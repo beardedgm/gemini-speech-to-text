@@ -26,7 +26,7 @@ test('loadConfig defaults and VOICE_DEV_GEMINI_KEY fallback', () => {
 test('skipReason: too short, silent, ok', () => {
   const cfg = { minSeconds: 0.3, silenceDb: -40 };
   assert.equal(skipReason(Buffer.alloc(3200), cfg), 'too short');
-  assert.match(skipReason(SILENT, cfg), /no speech/);
+  assert.equal(skipReason(SILENT, cfg), 'microphone sent no audio');
   assert.equal(skipReason(LOUD, cfg), null);
 });
 
@@ -35,7 +35,7 @@ test('Dictation in live mode uses the live transcript, and skips silence without
   const fakeLive = { begin: () => calls.push('begin'), push: () => calls.push('push'), finish: async () => 'raw words', abort: () => calls.push('abort') };
   const cfg = loadConfig({ GEMINI_API_KEY: 'k', FLOWCODE_MODE: 'live' });
   const silent = new Dictation(cfg, { liveFactory: () => fakeLive });
-  assert.deepEqual(await silent.finish(SILENT), { skipped: 'no speech (loudest -Infinity dBFS < -40)' });
+  assert.deepEqual(await silent.finish(SILENT), { skipped: 'microphone sent no audio' });
   assert.deepEqual(calls, ['begin', 'abort']);
 });
 
@@ -152,4 +152,27 @@ test('start and done sounds play independently according to the toggles', async 
   assert.deepEqual(await beepsFor({ GSTT_SOUND_START: '0' }), ['done']);
   assert.deepEqual(await beepsFor({ GSTT_SOUND_DONE: '0' }), ['start']);
   assert.deepEqual(await beepsFor({ GSTT_SOUND_START: '0', GSTT_SOUND_DONE: '0' }), []);
+});
+
+import { MIC_SILENT } from '../src/engine.js';
+
+test('exact digital silence is reported as a muted/stalled mic, not just "no speech"', () => {
+  const cfg = { minSeconds: 0.3, silenceDb: -40 };
+  assert.equal(skipReason(SILENT, cfg), MIC_SILENT);
+  const quiet = Buffer.alloc(32000);
+  for (let i = 0; i < quiet.length; i += 2) quiet.writeInt16LE(i % 4 ? 30 : -30, i); // room noise, about -60 dBFS
+  assert.match(skipReason(quiet, cfg), /^no speech/);
+});
+
+test('a silent-mic recording notifies the user with the microphone name and pastes nothing', async () => {
+  const p = fakePlatform(SILENT);
+  p.microphoneName = async () => 'Elgato Wave 3 Pro';
+  // Real Dictation (one-shot): the silence check runs before any Gemini call.
+  const svc = new DictationService(loadConfig({ GEMINI_API_KEY: 'k', GSTT_MODE: 'oneshot' }), p);
+  await svc.start();
+  const err = until(svc, 'error');
+  p.hotkey.handleKey(29, 1, 'k'); p.hotkey.handleKey(125, 1, 'k'); p.hotkey.handleKey(29, 0, 'k'); p.hotkey.handleKey(125, 0, 'k');
+  assert.match(await err, /Elgato Wave 3 Pro.*no sound at all.*muted/);
+  assert.deepEqual(p.pasted, []);
+  await svc.stop();
 });

@@ -9,10 +9,15 @@ import { LiveTranscriber } from './live.js';
 import { pcmLevels, pcmSeconds, toWav } from './recorder.js';
 
 // Returns why a clip should be skipped, or null if it should be transcribed.
+export const MIC_SILENT = 'microphone sent no audio';
+
 export function skipReason(pcm, { minSeconds, silenceDb }) {
   const secs = pcmSeconds(pcm);
   if (secs < minSeconds) return 'too short';
   const { peakWindowDb } = pcmLevels(pcm);
+  // Exactly zero signal: a working mic always picks up some noise, so this
+  // means it's muted (e.g. a hardware mute button) or its stream stalled.
+  if (peakWindowDb === -Infinity) return MIC_SILENT;
   if (peakWindowDb < silenceDb) return `no speech (loudest ${peakWindowDb.toFixed(0)} dBFS < ${silenceDb})`;
   return null;
 }
@@ -128,6 +133,12 @@ export class DictationService extends EventEmitter {
       const pcm = await this.recorder.stop();
       const t0 = Date.now();
       const { text, raw, skipped } = await this.current.finish(pcm);
+      if (skipped === MIC_SILENT) {
+        const mic = await this.platform.microphoneName?.().catch(() => null);
+        this.log(`Not sent: ${skipped}${mic ? ` (${mic})` : ''}.`);
+        this.emit('error', `Your microphone${mic ? ` (${mic})` : ''} sent no sound at all. Is it muted?`);
+        return;
+      }
       if (skipped) { this.log(`Not sent: ${skipped}.`); return; }
       if (raw !== undefined) this.log(`Live transcript (${Date.now() - t0} ms): ${raw}`, { private: true });
       if (!text) { this.log('No speech detected.'); return; }

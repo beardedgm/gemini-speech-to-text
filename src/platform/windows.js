@@ -204,6 +204,11 @@ export function pasteDescription() {
   return 'clipboard + Ctrl+V';
 }
 
+// The DirectShow mic in use (resolved when recording is first prepared).
+export async function microphoneName() {
+  return micName ?? null;
+}
+
 export function listKeyboards() {
   return [{ path: 'hook', name: 'Windows keyboard hook' }];
 }
