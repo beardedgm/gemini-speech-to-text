@@ -1,4 +1,4 @@
-// flowcode tray app: dictation engine + tray icon + Settings window.
+// Gemini Speech to Text tray app: dictation engine + tray icon + Settings window.
 
 // Must stay the first import: repairs stdout/stderr before any dependency touches them.
 import { replaced as replacedStdio } from '../src/stdio-guard.js';
@@ -12,6 +12,8 @@ import { DictationService } from '../src/engine.js';
 import { checkKey } from '../src/gemini.js';
 import { parseHotkey } from '../src/hotkey.js';
 import { loadPlatform } from '../src/platform/index.js';
+import { APP_NAME, APP_SLUG, migrateLegacyStateDir } from '../src/names.js';
+import { migrateFromFlowcode } from './migrate.js';
 import { mergeConfig, SettingsStore } from './store.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,7 +21,7 @@ const ASSETS = path.join(ROOT, 'assets');
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
-// Development fallback: the repo's .env (GEMINI_API_KEY / VOICE_DEV_GEMINI_KEY, FLOWCODE_*).
+// Development fallback: the repo's .env (GEMINI_API_KEY / VOICE_DEV_GEMINI_KEY, GSTT_* or legacy FLOWCODE_*).
 if (!app.isPackaged && fs.existsSync(path.join(ROOT, '.env'))) process.loadEnvFile(path.join(ROOT, '.env'));
 
 let tray, store, platform, service, settingsWin, logFile;
@@ -58,9 +60,9 @@ function refreshTray() {
   const config = currentConfig();
   const shown = configProblem(config) ? 'setup' : state;
   tray.setImage(icon(shown === 'setup' || shown === 'error' ? 'working' : shown));
-  tray.setToolTip(`flowcode: ${STATE_LABEL[shown]}${shown === 'idle' ? ` (hold ${config.hotkey})` : ''}`);
+  tray.setToolTip(`${APP_NAME}: ${STATE_LABEL[shown]}${shown === 'idle' ? ` (hold ${config.hotkey})` : ''}`);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: `flowcode: ${STATE_LABEL[shown]}`, enabled: false },
+    { label: `${APP_NAME}: ${STATE_LABEL[shown]}`, enabled: false },
     ...(lastError ? [{ label: lastError.slice(0, 80), enabled: false }] : []),
     { label: `Hold ${config.hotkey} to dictate`, enabled: false },
     { type: 'separator' },
@@ -77,7 +79,7 @@ function refreshTray() {
     { label: 'Start at login', type: 'checkbox', checked: isStartAtLogin(), click: (i) => setStartAtLogin(i.checked) },
     { label: 'Open log', click: () => shell.openPath(logFile) },
     { type: 'separator' },
-    { label: 'Quit flowcode', click: () => app.quit() },
+    { label: `Quit ${APP_NAME}`, click: () => app.quit() },
   ]));
 }
 
@@ -116,7 +118,7 @@ async function startService() {
   service.on('error', (m) => {
     lastError = m;
     refreshTray();
-    if (config.notify && Notification.isSupported()) new Notification({ title: 'flowcode', body: m, silent: true }).show();
+    if (config.notify && Notification.isSupported()) new Notification({ title: APP_NAME, body: m, silent: true }).show();
   });
   try {
     await service.start();
@@ -138,7 +140,7 @@ async function restartService() {
 
 // --- start at login -------------------------------------------------------------
 
-const AUTOSTART = path.join(os.homedir(), '.config', 'autostart', 'flowcode.desktop');
+const AUTOSTART = path.join(os.homedir(), '.config', 'autostart', `${APP_SLUG}.desktop`);
 
 function launchCommand() {
   // AppImage sets APPIMAGE; .deb installs a real executable; dev runs electron + app dir.
@@ -157,7 +159,7 @@ function setStartAtLogin(on) {
     if (on) {
       fs.mkdirSync(path.dirname(AUTOSTART), { recursive: true });
       fs.writeFileSync(AUTOSTART, [
-        '[Desktop Entry]', 'Type=Application', 'Name=flowcode', 'Comment=Hold-to-talk dictation',
+        '[Desktop Entry]', 'Type=Application', `Name=${APP_NAME}`, 'Comment=Hold-to-talk dictation with Gemini',
         `Exec=${launchCommand()}`, 'X-GNOME-Autostart-enabled=true', '',
       ].join('\n'));
     } else {
@@ -175,7 +177,7 @@ function setStartAtLogin(on) {
 function openSettings() {
   if (settingsWin) { settingsWin.show(); settingsWin.focus(); return; }
   settingsWin = new BrowserWindow({
-    width: 560, height: 720, resizable: true, title: 'flowcode Settings',
+    width: 560, height: 720, resizable: true, title: `${APP_NAME} Settings`,
     icon: path.join(ASSETS, 'icon.png'), autoHideMenuBar: true, show: false,
     webPreferences: { preload: path.join(ROOT, 'app', 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
@@ -239,10 +241,14 @@ app.on('window-all-closed', () => { /* stay in the tray */ });
 app.on('before-quit', () => { service?.stop(); });
 
 app.whenReady().then(async () => {
+  migrateLegacyStateDir(); // ~/.local/state/flowcode -> new name (log)
   store = new SettingsStore(app.getPath('userData'), safeStorage);
   platform = await loadPlatform();
-  logFile = path.join(platform.logDir(), 'flowcode.log');
+  logFile = path.join(platform.logDir(), `${APP_SLUG}.log`);
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  const migrated = migrateFromFlowcode({ store, appDataDir: app.getPath('appData') });
+  if (migrated.length) log(`Carried over from flowcode: ${migrated.join(', ')}.`);
+  if (store.data.startAtLogin && !isStartAtLogin()) setStartAtLogin(true);
   if (replacedStdio.length) log(`No usable ${replacedStdio.join('/')} (started without a terminal); console output goes to this log.`);
   registerIpc();
 

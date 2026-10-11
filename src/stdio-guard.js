@@ -12,16 +12,11 @@
 // error handler so a later EPIPE (terminal closed) can't crash the app.
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
+import { logFilePath } from './names.js';
 
-export function logFilePath() {
-  const base = process.platform === 'win32'
-    ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'flowcode')
-    : path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state'), 'flowcode');
-  return path.join(base, 'flowcode.log');
-}
+export { logFilePath };
 
 export function fileSink(file = logFilePath()) {
   return new Writable({

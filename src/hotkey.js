@@ -70,7 +70,7 @@ function hasBit(hexWords, bit) {
 }
 
 // Find real keyboards: devices that report EV_KEY and have the A key.
-// Our own injectors (ydotoold, flowcode's keytap) are excluded so we never hear our own keys.
+// Our own injectors (ydotoold, our keytap) are excluded so we never hear our own keys.
 export function findKeyboards(devicesText = fs.readFileSync('/proc/bus/input/devices', 'utf8')) {
   const keyboards = [];
   for (const block of devicesText.split(/\n\s*\n/)) {
@@ -78,7 +78,7 @@ export function findKeyboards(devicesText = fs.readFileSync('/proc/bus/input/dev
     const handlers = block.match(/^H: Handlers=(.*)$/m)?.[1] ?? '';
     const keyBits = block.match(/^B: KEY=(.*)$/m)?.[1];
     const event = handlers.match(/\bevent(\d+)\b/)?.[1];
-    if (!event || !keyBits || /ydotool|flowcode/i.test(name)) continue;
+    if (!event || !keyBits || /ydotool|gstt virtual|flowcode/i.test(name)) continue;
     if (!hasBit(keyBits, KEY_A)) continue;
     keyboards.push({ name, path: `/dev/input/event${event}` });
   }
@@ -89,7 +89,7 @@ export function findKeyboards(devicesText = fs.readFileSync('/proc/bus/input/dev
 //   'start'  - every hotkey group has a key down (start recording now)
 //   'stop'   - a hotkey group was released after a valid hold
 //   'cancel' - the hold was too short, or another key was pressed (it was a shortcut, not dictation)
-//   'debug'  - (message) hotkey-related events, for FLOWCODE_DEBUG
+//   'debug'  - (message) hotkey-related events, for GSTT_DEBUG
 //   'devices'- (list) the set of keyboards being read changed
 //
 // Key state is tracked per device, so one press reported by two devices isn't

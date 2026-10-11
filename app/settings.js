@@ -1,4 +1,4 @@
-// Settings window logic (renderer). Talks to the main process via window.flowcode.
+// Settings window logic (renderer). Talks to the main process via window.gstt.
 const $ = (id) => document.getElementById(id);
 
 function status(el, text, cls = '') {
@@ -7,7 +7,7 @@ function status(el, text, cls = '') {
 }
 
 async function load() {
-  const s = await window.flowcode.getSettings();
+  const s = await window.gstt.getSettings();
   document.querySelector(`input[name=mode][value=${s.mode}]`).checked = true;
   $('hotkey').value = s.hotkey;
   $('silence').value = s.silenceDb;
@@ -22,18 +22,18 @@ async function load() {
 
 $('test').addEventListener('click', async () => {
   status($('keyStatus'), 'Testing...');
-  const r = await window.flowcode.testKey($('key').value.trim() || null);
+  const r = await window.gstt.testKey($('key').value.trim() || null);
   status($('keyStatus'), r.ok ? `Key works (${r.model}).` : `Key check failed: ${r.error}`, r.ok ? 'ok' : 'err');
 });
 
 $('clearKey').addEventListener('click', async () => {
-  await window.flowcode.clearKey();
+  await window.gstt.clearKey();
   await load();
 });
 
 $('save').addEventListener('click', async () => {
   status($('saveStatus'), 'Saving...');
-  const r = await window.flowcode.saveSettings({
+  const r = await window.gstt.saveSettings({
     apiKey: $('key').value.trim() || undefined,
     mode: document.querySelector('input[name=mode]:checked').value,
     hotkey: $('hotkey').value.trim(),
@@ -46,7 +46,7 @@ $('save').addEventListener('click', async () => {
   await load();
 });
 
-$('cancel').addEventListener('click', () => window.flowcode.close());
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.flowcode.close(); });
+$('cancel').addEventListener('click', () => window.gstt.close());
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.gstt.close(); });
 
 load();

@@ -12,7 +12,7 @@ const GUARD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src
 // Electron main hit), then import the guard, then do what crashed: import
 // node:assert (reads process.stderr) and write to stderr.
 function runChild({ withGuard }) {
-  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'flowcode-guard-'));
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'gstt-guard-'));
   const script = `
     Object.defineProperty(process, 'stderr', { configurable: true, get() { const e = new Error('open EBADF'); e.code = 'EBADF'; throw e; } });
     ${withGuard ? `await import(${JSON.stringify(GUARD)});` : ''}
@@ -24,7 +24,7 @@ function runChild({ withGuard }) {
     } catch (e) { process.stdout.write('CRASH ' + e.code); }
   `;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env: { ...process.env, XDG_STATE_HOME: state } });
-  const logged = fs.existsSync(path.join(state, 'flowcode', 'flowcode.log')) ? fs.readFileSync(path.join(state, 'flowcode', 'flowcode.log'), 'utf8') : '';
+  const logged = fs.existsSync(path.join(state, 'gemini-speech-to-text', 'gemini-speech-to-text.log')) ? fs.readFileSync(path.join(state, 'gemini-speech-to-text', 'gemini-speech-to-text.log'), 'utf8') : '';
   return { out: r.stdout, logged };
 }
 
