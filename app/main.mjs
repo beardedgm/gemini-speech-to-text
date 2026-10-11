@@ -75,6 +75,13 @@ function refreshTray() {
         click: () => { store.update({ mode: m }); restartService(); },
       })),
     },
+    {
+      label: 'Sounds',
+      submenu: [
+        { label: 'When recording starts', type: 'checkbox', checked: config.soundStart, click: (i) => { store.update({ soundStart: i.checked }); restartService(); } },
+        { label: 'When text is pasted', type: 'checkbox', checked: config.soundDone, click: (i) => { store.update({ soundDone: i.checked }); restartService(); } },
+      ],
+    },
     { label: 'Settings…', click: openSettings },
     { label: 'Start at login', type: 'checkbox', checked: isStartAtLogin(), click: (i) => setStartAtLogin(i.checked) },
     { label: 'Open log', click: () => shell.openPath(logFile) },
@@ -177,7 +184,7 @@ function setStartAtLogin(on) {
 function openSettings() {
   if (settingsWin) { settingsWin.show(); settingsWin.focus(); return; }
   settingsWin = new BrowserWindow({
-    width: 560, height: 720, resizable: true, title: `${APP_NAME} Settings`,
+    width: 560, height: 900, resizable: true, title: `${APP_NAME} Settings`,
     icon: path.join(ASSETS, 'icon.png'), autoHideMenuBar: true, show: false,
     webPreferences: { preload: path.join(ROOT, 'app', 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
@@ -191,6 +198,7 @@ function registerIpc() {
     const config = currentConfig();
     return {
       mode: config.mode, hotkey: config.hotkey, silenceDb: config.silenceDb,
+      soundStart: config.soundStart, soundDone: config.soundDone,
       startAtLogin: isStartAtLogin(), hasKey: Boolean(config.apiKey),
       keySource: keySource(), keyProtection: store.keyProtection(),
     };
@@ -202,7 +210,7 @@ function registerIpc() {
       parseHotkey(v.hotkey); // throws on unknown keys
       if (!Number.isFinite(v.silenceDb) || v.silenceDb > -10 || v.silenceDb < -70) throw new Error('Silence cutoff must be between -70 and -10.');
       if (v.apiKey) store.setApiKey(v.apiKey);
-      store.update({ mode: v.mode, hotkey: v.hotkey.toUpperCase(), silenceDb: v.silenceDb });
+      store.update({ mode: v.mode, hotkey: v.hotkey.toUpperCase(), silenceDb: v.silenceDb, soundStart: Boolean(v.soundStart), soundDone: Boolean(v.soundDone) });
       if (v.startAtLogin !== isStartAtLogin()) setStartAtLogin(v.startAtLogin);
       await restartService();
       return { ok: true };

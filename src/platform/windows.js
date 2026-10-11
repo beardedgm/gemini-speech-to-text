@@ -208,5 +208,23 @@ export function listKeyboards() {
   return [{ path: 'hook', name: 'Windows keyboard hook' }];
 }
 
-export function beep() { /* no system sounds yet; the tray app will show state */ }
+// Built-in Windows sounds, played by a hidden PowerShell so we don't block.
+export const WINDOWS_SOUNDS = {
+  start: 'Speech On.wav',
+  done: 'Speech Off.wav',
+  error: 'Windows Critical Stop.wav',
+};
+
+export function soundScript(kind, mediaDir = path.join(process.env.SystemRoot || 'C:\\Windows', 'Media')) {
+  const file = WINDOWS_SOUNDS[kind];
+  if (!file) return null;
+  const full = path.win32.join(mediaDir, file).replace(/'/g, "''");
+  return `$p = '${full}'; if (Test-Path $p) { (New-Object Media.SoundPlayer $p).PlaySync() } else { [System.Media.SystemSounds]::Asterisk.Play(); Start-Sleep -Milliseconds 400 }`;
+}
+
+export function beep(kind) {
+  const script = soundScript(kind);
+  if (!script) return;
+  spawn('powershell.exe', [...PS, script], { stdio: 'ignore', windowsHide: true, detached: true }).on('error', () => {}).unref();
+}
 export function notify() { /* tray app will use Electron notifications */ }

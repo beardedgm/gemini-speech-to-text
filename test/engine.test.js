@@ -124,3 +124,32 @@ test('loadPlatform picks the OS layer', async () => {
 test('hotkey parsing is identical for Windows (CTRL+WIN == CTRL+SUPER)', () => {
   assert.deepEqual(parseHotkey('CTRL+WIN'), parseHotkey('CTRL+SUPER'));
 });
+
+test('sound toggles: both on by default, GSTT_SOUND_* / legacy env turn each off', () => {
+  const d = loadConfig({});
+  assert.equal(d.soundStart, true);
+  assert.equal(d.soundDone, true);
+  const off = loadConfig({ GSTT_SOUND_START: '0', FLOWCODE_SOUND_DONE: '0' });
+  assert.equal(off.soundStart, false);
+  assert.equal(off.soundDone, false);
+});
+
+async function beepsFor(env) {
+  const p = fakePlatform();
+  const beeps = [];
+  p.beep = (k) => beeps.push(k);
+  const svc = new DictationService(loadConfig({ GEMINI_API_KEY: 'k', ...env }), p, { dictationFactory: fakeDictation('hi') });
+  await svc.start();
+  const pasted = until(svc, 'pasted');
+  p.hotkey.handleKey(29, 1, 'k'); p.hotkey.handleKey(125, 1, 'k'); p.hotkey.handleKey(29, 0, 'k'); p.hotkey.handleKey(125, 0, 'k');
+  await pasted;
+  await svc.stop();
+  return beeps;
+}
+
+test('start and done sounds play independently according to the toggles', async () => {
+  assert.deepEqual(await beepsFor({}), ['start', 'done']);
+  assert.deepEqual(await beepsFor({ GSTT_SOUND_START: '0' }), ['done']);
+  assert.deepEqual(await beepsFor({ GSTT_SOUND_DONE: '0' }), ['start']);
+  assert.deepEqual(await beepsFor({ GSTT_SOUND_START: '0', GSTT_SOUND_DONE: '0' }), []);
+});

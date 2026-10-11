@@ -46,3 +46,13 @@ test('mergeConfig: app settings override .env, stored key wins over env key', ()
     { ...env, mode: 'oneshot', silenceDb: -48, apiKey: 'stored' });
   assert.equal(mergeConfig(env, {}, null).apiKey, 'envkey');
 });
+
+test('sound toggles are saved and override .env', () => {
+  const s = new SettingsStore(tmp(), fakeSafe());
+  s.update({ soundStart: false, soundDone: true });
+  assert.deepEqual(s.settings, { soundStart: false, soundDone: true });
+  const env = { apiKey: 'k', soundStart: true, soundDone: false };
+  const merged = mergeConfig(env, s.settings, null);
+  assert.equal(merged.soundStart, false);
+  assert.equal(merged.soundDone, true);
+});

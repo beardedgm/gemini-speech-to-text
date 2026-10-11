@@ -65,3 +65,14 @@ test('paste flow with an injected backend: save, write, Ctrl+V, restore; non-tex
   await pasteText('hi', { backend: backend(null), restoreDelayMs: 0 }); // e.g. an image was on the clipboard
   assert.deepEqual(calls, ['read', 'write:hi', 'ctrl+v']);
 });
+
+import { soundScript, WINDOWS_SOUNDS } from '../src/platform/windows.js';
+
+test('Windows sounds use built-in media files with a system-sound fallback', () => {
+  const s = soundScript('start', 'C:\\Windows\\Media');
+  assert.match(s, /C:\\Windows\\Media\\Speech On\.wav/);
+  assert.match(s, /SystemSounds/);
+  assert.match(soundScript('done', 'C:\\Windows\\Media'), /Speech Off\.wav/);
+  assert.equal(soundScript('nope'), null);
+  assert.deepEqual(Object.keys(WINDOWS_SOUNDS), ['start', 'done', 'error']);
+});

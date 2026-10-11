@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const SETTING_KEYS = ['mode', 'hotkey', 'silenceDb', 'startAtLogin'];
+export const SETTING_KEYS = ['mode', 'hotkey', 'silenceDb', 'startAtLogin', 'soundStart', 'soundDone'];
 
 export class SettingsStore {
   // safeStorage is injected so this can be tested without Electron.
@@ -70,6 +70,8 @@ export function mergeConfig(envConfig, settings, storedKey) {
     ...(settings.mode ? { mode: settings.mode } : {}),
     ...(settings.hotkey ? { hotkey: settings.hotkey } : {}),
     ...(Number.isFinite(settings.silenceDb) ? { silenceDb: settings.silenceDb } : {}),
+    ...(typeof settings.soundStart === 'boolean' ? { soundStart: settings.soundStart } : {}),
+    ...(typeof settings.soundDone === 'boolean' ? { soundDone: settings.soundDone } : {}),
     apiKey: storedKey || envConfig.apiKey,
   };
 }
