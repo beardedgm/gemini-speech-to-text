@@ -12,6 +12,8 @@ async function load() {
   $('hotkey').value = s.hotkey;
   $('silence').value = s.silenceDb;
   $('login').checked = s.startAtLogin;
+  $('soundStart').checked = s.soundStart;
+  $('soundDone').checked = s.soundDone;
   $('clearKey').hidden = s.keySource !== 'keychain';
   if (s.keySource === 'keychain') status($('keyStatus'), 'A key is saved. Leave the field empty to keep it.', 'ok');
   else if (s.keySource === 'env') status($('keyStatus'), 'Using the key from the .env file (development). Paste one here to store it in the keychain.', 'warn');
@@ -39,6 +41,8 @@ $('save').addEventListener('click', async () => {
     hotkey: $('hotkey').value.trim(),
     silenceDb: Number($('silence').value),
     startAtLogin: $('login').checked,
+    soundStart: $('soundStart').checked,
+    soundDone: $('soundDone').checked,
   });
   if (!r.ok) return status($('saveStatus'), r.error, 'err');
   $('key').value = '';

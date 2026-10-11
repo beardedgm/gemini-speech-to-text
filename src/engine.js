@@ -106,7 +106,7 @@ export class DictationService extends EventEmitter {
       const d = this.makeDictation(this.config, { log: (m) => this.log(m) });
       this.current = d;
       this.recorder.start({ onChunk: (c) => d.push(c) });
-      this.platform.beep('start');
+      if (this.config.soundStart !== false) this.platform.beep('start');
       this.log('Recording...');
       this.setState('recording');
     } catch (e) { this.log(`Could not start recording: ${e.message}`); }
@@ -136,7 +136,7 @@ export class DictationService extends EventEmitter {
       if (!released) this.emit('debug', 'hotkey still held after 1.5 s; pasting anyway');
       if (this.config.dryRun) { this.log(`[dry run] would paste: ${text}`, { private: true }); return; }
       await this.platform.pasteText(text, { restore: this.config.restore });
-      this.platform.beep('done');
+      if (this.config.soundDone !== false) this.platform.beep('done');
       this.log(`Pasted ${Date.now() - t0} ms after release: ${text}`, { private: true });
       this.emit('pasted', text, Date.now() - t0);
     } catch (e) {

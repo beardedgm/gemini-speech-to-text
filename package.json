@@ -1,7 +1,7 @@
 {
   "name": "gemini-speech-to-text",
   "productName": "Gemini Speech to Text",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Hold-to-talk dictation powered by Google Gemini",
   "homepage": "https://github.com/beardedgm/gemini-speech-to-text",

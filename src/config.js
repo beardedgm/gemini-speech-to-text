@@ -26,6 +26,9 @@ export function loadConfig(env = process.env, root = process.cwd()) {
     silenceDb: Number(get('SILENCE_DB') ?? -40),
     debug: get('DEBUG') === '1',
     notify: get('NOTIFY') !== '0',
+    // Sounds: start of recording, and after the text is pasted. On unless set to 0.
+    soundStart: get('SOUND_START') !== '0',
+    soundDone: get('SOUND_DONE') !== '0',
     // Do everything except the paste (for testing).
     dryRun: get('DRY_RUN') === '1',
   };

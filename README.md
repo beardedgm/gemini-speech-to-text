@@ -87,6 +87,8 @@ Everything is also logged to `~/.local/state/gemini-speech-to-text/gemini-speech
 | `GSTT_DEBUG` | `0` | `1` logs every hotkey key event and the device it came from. |
 | `GSTT_DRY_RUN` | `0` | `1` does everything except the paste (logs the text instead). |
 | `GSTT_NOTIFY` | `1` | `0` turns off error notifications. |
+| `GSTT_SOUND_START` | `1` | `0` turns off the sound when recording starts. |
+| `GSTT_SOUND_DONE` | `1` | `0` turns off the sound after the text is pasted. |
 | `GSTT_DICTIONARY` | `dictionary.txt` | Path to your dictionary file. |
 | `GSTT_RESTORE_CLIPBOARD` | `1` | Set to `0` to leave the dictated text on the clipboard. |
 
@@ -169,14 +171,14 @@ Settings are the same as on Linux. `GSTT_MIC` picks a microphone by name (from `
 - ffmpeg DirectShow capture: device naming, about 50 ms of buffering, and quitting cleanly on `q`.
 - PowerShell clipboard speed (about 0.3–0.5 s per call adds paste delay) and Unicode round-trip. The tray app will switch to Electron's built-in clipboard.
 - Paste into UWP/Store apps and terminals (Windows Terminal pastes on Ctrl+V; older consoles may not).
-- There are no start/stop sounds or notifications on Windows yet; the tray app will add them.
+- Sounds use the built-in Windows media files and are untested.
 
 ## Tray app
 
 The tray app is the same engine with a tray icon and a Settings window. It's the easiest way to use the app day to day.
 
 - **Tray icon:** gray when ready, red while recording, amber while transcribing. The menu has: the current status, a mode switch (Live / One-shot), Settings…, Start at login, Open log, and Quit.
-- **Settings:** API key, mode, hotkey, silence cutoff and start at login. On first launch with no key, Settings opens by itself.
+- **Settings:** API key, mode, hotkey, silence cutoff, sounds (start of recording and after pasting, each on or off) and start at login. The sounds can also be toggled from the tray menu (Sounds). On first launch with no key, Settings opens by itself.
   - The **API key** is encrypted with the OS keychain (Electron `safeStorage`: Secret Service/gnome-keyring on Linux, DPAPI on Windows) and saved in the app's config folder. It is never stored as plain text and never sent to the Settings page; the page can only tell whether a key exists. **Test** checks a key with one small Gemini request.
   - For development, the repo's `.env` (`GEMINI_API_KEY` / `VOICE_DEV_GEMINI_KEY`) still works when no key is saved.
 - **Start at login:** Linux writes `~/.config/autostart/gemini-speech-to-text.desktop`; Windows uses the standard login item.
