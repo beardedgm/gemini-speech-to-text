@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>flowcode Settings</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1d2129; --muted: #626b78; --line: #dde1e6; --field: #f6f7f9;
+    --accent: #4f46e5; --accent-fg: #ffffff; --ok: #15803d; --warn: #b45309; --err: #b91c1c;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17191d; --fg: #e7e9ec; --muted: #9aa3ae; --line: #2c3037; --field: #20232a;
+      --accent: #818cf8; --accent-fg: #0f1115; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 28px 20px; background: var(--bg); color: var(--fg);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  section { padding: 16px 0; border-top: 1px solid var(--line); }
+  label.title { display: block; font-weight: 600; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  input[type=password], input[type=text], input[type=number] {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--field); color: var(--fg); font: inherit;
+  }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  .choices { display: grid; gap: 8px; }
+  .choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .choice:has(input:checked) { border-color: var(--accent); }
+  .choice input { margin-top: 3px; }
+  .choice span { display: block; color: var(--muted); font-size: 12.5px; }
+  button {
+    padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--field); color: var(--fg); font: inherit; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  button.link { border: none; background: none; color: var(--accent); padding: 0; }
+  .status { font-size: 12.5px; margin-top: 6px; min-height: 18px; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  footer { display: flex; justify-content: space-between; align-items: center; padding-top: 16px; border-top: 1px solid var(--line); }
+  .check { display: flex; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+  <h1>flowcode Settings</h1>
+  <p class="sub">Hold your hotkey, talk, let go: the text is typed where your cursor is.</p>
+
+  <section>
+    <label class="title" for="key">Gemini API key</label>
+    <div class="row">
+      <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key (starts with AIza…)">
+      <button id="test" type="button">Test</button>
+    </div>
+    <div id="keyStatus" class="status"></div>
+    <div class="hint">Get a free key at <b>aistudio.google.com/apikey</b>. It's stored encrypted in your system keychain, never in a plain file. <button id="clearKey" class="link" type="button" hidden>Remove saved key</button></div>
+  </section>
+
+  <section>
+    <label class="title">Mode</label>
+    <div class="choices">
+      <label class="choice"><input type="radio" name="mode" value="live"><div>Live <span>Streams while you talk. Text appears about 1 second after you let go. Recommended.</span></div></label>
+      <label class="choice"><input type="radio" name="mode" value="oneshot"><div>One-shot <span>Sends the recording after you let go. A bit slower; also used automatically if live fails.</span></div></label>
+    </div>
+  </section>
+
+  <section>
+    <label class="title" for="hotkey">Hotkey</label>
+    <input id="hotkey" type="text" spellcheck="false">
+    <div class="hint">Keys to hold, joined with +. CTRL, SUPER (WIN), ALT and SHIFT match either side. Example: CTRL+SUPER, or KEY_RIGHTCTRL.</div>
+  </section>
+
+  <section>
+    <label class="title" for="silence">Silence cutoff (dBFS)</label>
+    <input id="silence" type="number" step="1" min="-70" max="-10">
+    <div class="hint">Recordings quieter than this aren't sent. Lower it (e.g. -48) if quiet speech gets ignored; raise it if background noise turns into words.</div>
+  </section>
+
+  <footer>
+    <label class="check"><input id="login" type="checkbox"> Start at login</label>
+    <div class="row">
+      <span id="saveStatus" class="status"></span>
+      <button id="cancel" type="button">Close</button>
+      <button id="save" class="primary" type="button">Save</button>
+    </div>
+  </footer>
+
+  <script src="settings.js"></script>
+</body>
+</html>

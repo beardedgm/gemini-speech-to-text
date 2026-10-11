@@ -1,0 +1,18 @@
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+*.key
+settings.json
+
+# Local only
+wispr-rea-notes.md
+dictionary.txt
+node_modules/
+dist/
+build/vendor/
+*.wav
+*.log
+test-recording.wav
+.keytest.mjs
+.*.mjs

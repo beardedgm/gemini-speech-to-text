@@ -1,0 +1,5 @@
+# One word or phrase per line. Lines starting with # are ignored.
+# Names, jargon, and spellings Gemini should prefer.
+Pop!_OS
+COSMIC
+Gemini

@@ -1,0 +1,92 @@
+{
+  "name": "flowcode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hold-to-talk dictation powered by Gemini",
+  "type": "module",
+  "bin": {
+    "flowcode": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "app": "electron .",
+    "test": "node --test --test-timeout=10000",
+    "icons": "node scripts/make-icons.mjs",
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:win": "node scripts/fetch-win-ffmpeg.mjs && electron-builder --win nsis"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@google/genai": "2.24.0"
+  },
+  "optionalDependencies": {
+    "@ffmpeg-installer/win32-x64": "4.1.0",
+    "uiohook-napi": "1.5.5"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.16.1"
+  },
+  "main": "app/main.mjs",
+  "productName": "flowcode",
+  "author": "Derrick",
+  "build": {
+    "appId": "dev.flowcode.app",
+    "productName": "flowcode",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "app/**",
+      "src/**",
+      "assets/**",
+      "package.json",
+      "!**/*.test.js"
+    ],
+    "asarUnpack": [
+      "src/keytap.py"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "icon": "assets/icon.png",
+      "synopsis": "Hold-to-talk dictation powered by Gemini"
+    },
+    "deb": {
+      "depends": [
+        "python3",
+        "wl-clipboard",
+        "ydotool",
+        "pipewire-bin",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libsecret-1-0"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.png",
+      "extraResources": [
+        {
+          "from": "build/vendor/win32-x64/ffmpeg.exe",
+          "to": "ffmpeg.exe"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "shortcutName": "flowcode"
+    }
+  }
+}
