@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Tiny virtual keyboard for flowcode (stdlib only).
+"""Tiny virtual keyboard for Gemini Speech to Text (stdlib only).
 
 Creates a uinput device once, then taps keys on request. Each line on stdin
 is a Linux key code to tap (press + release); "quit" exits. Prints "ready"
 once the device exists.
 
-flowcode uses it to tap KEY_F24 (bound to nothing) while Super is held, so
+The app uses it to tap KEY_F24 (bound to nothing) while Super is held, so
 COSMIC sees the Super press as part of a chord and doesn't open the Launcher
 when Super is released.
 """
@@ -34,7 +34,7 @@ def main():
     fcntl.ioctl(fd, UI_SET_EVBIT, EV_KEY)
     for k in KEYS:
         fcntl.ioctl(fd, UI_SET_KEYBIT, k)
-    name = b"flowcode virtual keys"
+    name = b"gstt virtual keys"
     setup = struct.pack("HHHH80sI", BUS_VIRTUAL, 0x1234, 0x5678, 1, name, 0)
     fcntl.ioctl(fd, UI_DEV_SETUP, setup)
     fcntl.ioctl(fd, UI_DEV_CREATE)

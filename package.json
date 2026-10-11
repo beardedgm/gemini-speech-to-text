@@ -1,12 +1,17 @@
 {
-  "name": "flowcode",
-  "version": "0.1.0",
+  "name": "gemini-speech-to-text",
+  "productName": "Gemini Speech to Text",
+  "version": "0.1.1",
   "private": true,
-  "description": "Hold-to-talk dictation powered by Gemini",
+  "description": "Hold-to-talk dictation powered by Google Gemini",
+  "homepage": "https://github.com/beardedgm/gemini-speech-to-text",
+  "author": "Derrick",
   "type": "module",
+  "main": "app/main.mjs",
   "bin": {
-    "flowcode": "src/cli.js"
+    "gstt": "src/cli.js"
   },
+  "desktopName": "gemini-speech-to-text.desktop",
   "scripts": {
     "start": "node src/cli.js",
     "app": "electron .",
@@ -29,12 +34,9 @@
     "electron": "44.4.5",
     "electron-builder": "26.16.1"
   },
-  "main": "app/main.mjs",
-  "productName": "flowcode",
-  "author": "Derrick",
   "build": {
-    "appId": "dev.flowcode.app",
-    "productName": "flowcode",
+    "appId": "io.github.beardedgm.gemini-speech-to-text",
+    "productName": "Gemini Speech to Text",
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -56,9 +58,11 @@
       ],
       "category": "Utility",
       "icon": "assets/icon.png",
-      "synopsis": "Hold-to-talk dictation powered by Gemini",
+      "synopsis": "Hold-to-talk dictation powered by Google Gemini",
       "maintainer": "BeardedGM",
-      "syncDesktopName": true
+      "syncDesktopName": true,
+      "executableName": "gemini-speech-to-text",
+      "artifactName": "gemini-speech-to-text-${version}.${ext}"
     },
     "deb": {
       "depends": [
@@ -70,6 +74,11 @@
         "libnss3",
         "libxss1",
         "libsecret-1-0"
+      ],
+      "artifactName": "gemini-speech-to-text_${version}_${arch}.${ext}",
+      "fpm": [
+        "--replaces=flowcode",
+        "--conflicts=flowcode"
       ]
     },
     "win": {
@@ -88,10 +97,9 @@
       "oneClick": true,
       "perMachine": false,
       "runAfterFinish": true,
-      "shortcutName": "flowcode"
+      "shortcutName": "Gemini Speech to Text",
+      "artifactName": "Gemini Speech to Text Setup ${version}.${ext}"
     },
     "npmRebuild": false
-  },
-  "homepage": "https://github.com/beardedgm/gemini-speech-to-text",
-  "desktopName": "flowcode.desktop"
+  }
 }

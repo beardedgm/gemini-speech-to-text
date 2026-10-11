@@ -110,6 +110,7 @@ test('findKeyboards keeps real keyboards and skips ydotoold and keyless devices'
     'N: Name="Power Button"\nH: Handlers=kbd event1\nB: KEY=10000000000000 0',
     'N: Name="ydotoold virtual device"\nH: Handlers=kbd event26\nB: KEY=ffffffffffffffff ffffffffffffffff',
     'N: Name="flowcode virtual keys"\nH: Handlers=kbd event13\nB: KEY=ffffffffffffffff ffffffffffffffff',
+    'N: Name="gstt virtual keys"\nH: Handlers=kbd event14\nB: KEY=ffffffffffffffff ffffffffffffffff',
     'N: Name="Some Keyboard"\nH: Handlers=sysrq kbd event9 leds\nB: KEY=1000000000007 ff9f207ac14057ff febeffdfffefffff fffffffffffffffe',
   ].join('\n\n');
   assert.deepEqual(findKeyboards(procText), [{ name: 'Some Keyboard', path: '/dev/input/event9' }]);

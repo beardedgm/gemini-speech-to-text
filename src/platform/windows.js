@@ -7,10 +7,10 @@
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { HoldToTalk, KEY_CODES } from '../hotkey.js';
+import { envSetting, stateDir } from '../names.js';
 import { Recorder } from '../recorder.js';
 import { pasteText as pasteWith } from '../paste.js';
 
@@ -19,7 +19,7 @@ const require = createRequire(import.meta.url);
 const execFileP = promisify(execFile);
 
 export function logDir() {
-  return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'flowcode');
+  return stateDir();
 }
 
 // --- hotkey -----------------------------------------------------------------
@@ -96,7 +96,8 @@ export function createHotkey(keys) {
 // --- microphone ---------------------------------------------------------------
 
 export function ffmpegPath() {
-  if (process.env.FLOWCODE_FFMPEG) return process.env.FLOWCODE_FFMPEG;
+  const custom = envSetting(process.env, 'FFMPEG');
+  if (custom) return custom;
   // Packaged tray app: shipped as an extra resource.
   const bundled = process.resourcesPath && path.join(process.resourcesPath, 'ffmpeg.exe');
   if (bundled && fs.existsSync(bundled)) return bundled;
@@ -146,10 +147,10 @@ export function createRecorder() {
     stopProcess: (p) => { try { p.stdin.write('q'); } catch { p.kill(); } }, // ffmpeg quits cleanly on "q"
   });
   const start = rec.start.bind(rec);
-  // Resolve the mic once (FLOWCODE_MIC or the first DirectShow audio device).
+  // Resolve the mic once (GSTT_MIC or the first DirectShow audio device).
   rec.prepare = async () => {
-    micName ??= process.env.FLOWCODE_MIC || (await listMicrophones())[0];
-    if (!micName) throw new Error('No microphone found (ffmpeg -list_devices). Set FLOWCODE_MIC.');
+    micName ??= envSetting(process.env, 'MIC') || (await listMicrophones())[0];
+    if (!micName) throw new Error('No microphone found (ffmpeg -list_devices). Set GSTT_MIC.');
     rec.args = ffmpegMicArgs(micName);
     return micName;
   };

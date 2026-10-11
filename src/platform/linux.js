@@ -2,17 +2,17 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { HoldToTalk, SUPER_KEYS, findKeyboards } from '../hotkey.js';
 import { KeyTap } from '../keytap.js';
+import { APP_NAME, stateDir } from '../names.js';
 import { Recorder } from '../recorder.js';
 import { detectBackend, pasteText as pasteWith } from '../paste.js';
 
 export const name = 'linux';
 
 export function logDir() {
-  return path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state'), 'flowcode');
+  return stateDir();
 }
 
 // keys: parsed hotkey groups. onWarn: message callback for non-fatal problems.
@@ -58,5 +58,5 @@ export function beep(kind) {
 export function notify(summary, body = '') {
   spawn('gdbus', ['call', '--session', '--dest', 'org.freedesktop.Notifications',
     '--object-path', '/org/freedesktop/Notifications', '--method', 'org.freedesktop.Notifications.Notify',
-    'flowcode', '0', 'audio-input-microphone', summary, body, '[]', '{}', '5000'], { stdio: 'ignore' }).on('error', () => {});
+    APP_NAME, '0', 'audio-input-microphone', summary, body, '[]', '{}', '5000'], { stdio: 'ignore' }).on('error', () => {});
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// flowcode: hold a key, talk, let go, and the cleaned-up text is pasted where your cursor is.
+// Gemini Speech to Text (command line): hold the hotkey, talk, let go, and the
+// cleaned-up text is pasted where your cursor is.
 
 import './stdio-guard.js'; // first: survive being started without a terminal
 import fs from 'node:fs';
@@ -9,6 +10,7 @@ import { configProblem, loadConfig } from './config.js';
 import { Dictation, DictationService } from './engine.js';
 import { loadDictionary, transcribe } from './gemini.js';
 import { parseHotkey } from './hotkey.js';
+import { APP_NAME, logFilePath, migrateLegacyStateDir } from './names.js';
 import { loadPlatform } from './platform/index.js';
 import { pcmLevels, pcmSeconds, toWav, wavPcm } from './recorder.js';
 
@@ -21,7 +23,8 @@ const platform = await loadPlatform();
 
 // Everything is also appended to a log file, since the terminal usually isn't
 // visible while dictating into another app. Dictated text stays out of it.
-const LOG_FILE = path.join(platform.logDir(), 'flowcode.log');
+migrateLegacyStateDir(); // ~/.local/state/flowcode -> new name
+const LOG_FILE = logFilePath();
 fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
 function log(msg, { private: isPrivate = false } = {}) {
   console.log(new Date().toLocaleTimeString(), msg);
@@ -43,7 +46,7 @@ async function runDictation() {
   const service = new DictationService(config, platform);
   service.on('log', log);
   service.on('debug', debug);
-  service.on('error', (m) => { if (config.notify) platform.notify('flowcode', m); });
+  service.on('error', (m) => { if (config.notify) platform.notify(APP_NAME, m); });
   await service.start();
   log(`Hold ${config.hotkey}, talk, release. Log file: ${LOG_FILE}${config.debug ? ' (debug on)' : ''}`);
   const quit = () => { service.stop().finally(() => process.exit(0)); };
@@ -103,7 +106,7 @@ async function testRecord(seconds = 3) {
   log(`Saved ${file} (${pcmSeconds(pcm).toFixed(2)}s, avg ${rmsDb.toFixed(0)} dBFS, loudest ${peakWindowDb.toFixed(0)} dBFS; speech threshold ${config.silenceDb}).`);
 }
 
-async function testPaste(text = 'Hello from flowcode.', delay = 3) {
+async function testPaste(text = 'Hello from Gemini Speech to Text.', delay = 3) {
   log(`Focus a text field. Pasting in ${delay}s via ${platform.pasteDescription()}...`);
   await new Promise((res) => setTimeout(res, delay * 1000));
   await platform.pasteText(text, { restore: config.restore });
@@ -131,7 +134,7 @@ const commands = {
   devices,
 };
 if (!commands[cmd]) {
-  console.log('Usage: flowcode [run | test-hotkey | test-record [secs] | test-paste [text] [delay] | transcribe <file.wav> | bench <file.wav> [oneshot|live] [runs] | devices]');
+  console.log('Usage: gstt [run | test-hotkey | test-record [secs] | test-paste [text] [delay] | transcribe <file.wav> | bench <file.wav> [oneshot|live] [runs] | devices]');
   process.exit(1);
 }
 Promise.resolve(commands[cmd]()).catch((e) => { console.error(e.message); process.exit(1); });

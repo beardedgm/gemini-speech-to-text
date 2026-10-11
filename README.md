@@ -1,4 +1,4 @@
-# flowcode
+# Gemini Speech to Text
 
 Hold-to-talk dictation for Linux, powered by Gemini.
 
@@ -26,7 +26,7 @@ The hold is cancelled, with nothing sent, in two cases:
 
 Recording starts when both Ctrl and Super are down, and stops when either is released. Paste waits until both are up, so the simulated Ctrl+V never combines with a key you're still holding.
 
-**COSMIC Launcher:** on COSMIC, tapping Super alone opens the Launcher. To stop a Ctrl+Super hold from counting as that tap, flowcode taps F24, a key bound to nothing, through its own virtual keyboard (`src/keytap.py`, Python standard library only). This uses `/dev/uinput`, which members of the `input` group can already use.
+**COSMIC Launcher:** on COSMIC, tapping Super alone opens the Launcher. To stop a Ctrl+Super hold from counting as that tap, the app taps F24, a key bound to nothing, through its own virtual keyboard (`src/keytap.py`, Python standard library only). This uses `/dev/uinput`, which members of the `input` group can already use.
 
 ## Setup
 
@@ -34,7 +34,7 @@ Recording starts when both Ctrl and Super are down, and stops when either is rel
 Requires Node 22 or newer. You have 24.
 
 ```bash
-cd ~/Desktop/flowcode
+cd gemini-speech-to-text
 ```
 ```bash
 npm install
@@ -72,23 +72,23 @@ npm start
 
 Then hold **Ctrl+Super**, talk, and release. Stop the app with Ctrl+C in its terminal.
 
-Everything is also logged to `~/.local/state/flowcode/flowcode.log`. Dictated text is left out of the log file. Errors also show as desktop notifications.
+Everything is also logged to `~/.local/state/gemini-speech-to-text/gemini-speech-to-text.log`. Dictated text is left out of the log file. Errors also show as desktop notifications.
 
 ## Settings (in `.env`)
 
 | Variable | Default | Notes |
 |---|---|---|
-| `FLOWCODE_HOTKEY` | `CTRL+SUPER` | Keys joined with `+`. `CTRL`, `SUPER` (`WIN`), `ALT` and `SHIFT` match either side. Exact evdev names also work, e.g. `KEY_RIGHTCTRL` or `KEY_F13`. |
-| `FLOWCODE_MODE` | `live` | `live` or `oneshot` (see "Live mode"). |
+| `GSTT_HOTKEY` | `CTRL+SUPER` | Keys joined with `+`. `CTRL`, `SUPER` (`WIN`), `ALT` and `SHIFT` match either side. Exact evdev names also work, e.g. `KEY_RIGHTCTRL` or `KEY_F13`. |
+| `GSTT_MODE` | `live` | `live` or `oneshot` (see "Live mode"). |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Model for one-shot transcription, and the fallback if live fails. |
-| `FLOWCODE_LIVE_MODEL` | `gemini-3.8-live` | Live API model for live mode. `gemini-3.5-transcribe-live` also works. |
-| `FLOWCODE_CLEANUP_MODEL` | `gemini-3.5-flash-lite` | Text model that cleans up the live transcript. |
-| `FLOWCODE_SILENCE_DB` | `-40` | Silence cutoff in dBFS (see "Silence check"). |
-| `FLOWCODE_DEBUG` | `0` | `1` logs every hotkey key event and the device it came from. |
-| `FLOWCODE_DRY_RUN` | `0` | `1` does everything except the paste (logs the text instead). |
-| `FLOWCODE_NOTIFY` | `1` | `0` turns off error notifications. |
-| `FLOWCODE_DICTIONARY` | `dictionary.txt` | Path to your dictionary file. |
-| `FLOWCODE_RESTORE_CLIPBOARD` | `1` | Set to `0` to leave the dictated text on the clipboard. |
+| `GSTT_LIVE_MODEL` | `gemini-3.8-live` | Live API model for live mode. `gemini-3.5-transcribe-live` also works. |
+| `GSTT_CLEANUP_MODEL` | `gemini-3.5-flash-lite` | Text model that cleans up the live transcript. |
+| `GSTT_SILENCE_DB` | `-40` | Silence cutoff in dBFS (see "Silence check"). |
+| `GSTT_DEBUG` | `0` | `1` logs every hotkey key event and the device it came from. |
+| `GSTT_DRY_RUN` | `0` | `1` does everything except the paste (logs the text instead). |
+| `GSTT_NOTIFY` | `1` | `0` turns off error notifications. |
+| `GSTT_DICTIONARY` | `dictionary.txt` | Path to your dictionary file. |
+| `GSTT_RESTORE_CLIPBOARD` | `1` | Set to `0` to leave the dictated text on the clipboard. |
 
 ## Test commands (no API key needed)
 
@@ -103,20 +103,20 @@ Everything is also logged to `~/.local/state/flowcode/flowcode.log`. Dictated te
 | `npm test` | Runs the unit tests. |
 
 ## Known limits (v1)
-- **Terminals:** most terminals paste with Ctrl+Shift+V, so Ctrl+V does nothing there. Use `FLOWCODE_RESTORE_CLIPBOARD=0` and paste by hand, or dictate into other apps.
+- **Terminals:** most terminals paste with Ctrl+Shift+V, so Ctrl+V does nothing there. Use `GSTT_RESTORE_CLIPBOARD=0` and paste by hand, or dictate into other apps.
 - **Wait time:** the text appears after you let go, once Gemini replies (usually about 1–2 s). There's no live preview.
 - **Unplugged keyboards:** a keyboard plugged in after starting isn't picked up. Restart the app.
 - **Non-text clipboard:** if your clipboard held an image, it isn't restored, but it isn't overwritten until the paste either.
 - **Audio limit:** clips are sent inline, which caps them at about 20 MB (roughly 10 minutes of audio).
 
 ## Silence check
-Before anything is sent, the clip's loudest 50 ms must be louder than `FLOWCODE_SILENCE_DB` (default `-40` dBFS). Quieter clips are dropped without calling Gemini, because models tend to invent text for silence.
+Before anything is sent, the clip's loudest 50 ms must be louder than `GSTT_SILENCE_DB` (default `-40` dBFS). Quieter clips are dropped without calling Gemini, because models tend to invent text for silence.
 
-If quiet speech gets dropped, lower the threshold in `.env`, e.g. `FLOWCODE_SILENCE_DB=-48`. To see your mic's levels, run `node src/cli.js test-record 3`.
+If quiet speech gets dropped, lower the threshold in `.env`, e.g. `GSTT_SILENCE_DB=-48`. To see your mic's levels, run `node src/cli.js test-record 3`.
 
 ## Live mode
 
-Live is the default. To use one-shot instead, set `FLOWCODE_MODE=oneshot` in `.env`.
+Live is the default. To use one-shot instead, set `GSTT_MODE=oneshot` in `.env`.
 
 How it works:
 - **Key down:** opens a Live API session and streams mic audio in 100 ms chunks.
@@ -150,9 +150,9 @@ The Gemini core is shared by both systems: live and one-shot modes, cleanup, dic
 
 To try it:
 1. Install Node.js 22 LTS or newer from https://nodejs.org.
-2. Copy the `flowcode` folder over, without `node_modules`. In PowerShell:
+2. Copy the project folder over, without `node_modules`. In PowerShell:
    ```
-   cd flowcode
+   cd gemini-speech-to-text
    npm install
    copy .env.example .env
    notepad .env
@@ -161,7 +161,7 @@ To try it:
 3. Optional check: `node src\cli.js devices` should list your microphone(s). `node src\cli.js test-record 3` records a test clip.
 4. Run `npm start`. Click into Notepad, hold **Ctrl+Win**, talk, and let go.
 
-Settings are the same as on Linux. `FLOWCODE_MIC` picks a microphone by name (from `devices`); the default is the first one. `FLOWCODE_HOTKEY=CTRL+WIN` is the same as `CTRL+SUPER`. Logs go to `%LOCALAPPDATA%\flowcode\flowcode.log`.
+Settings are the same as on Linux. `GSTT_MIC` picks a microphone by name (from `devices`); the default is the first one. `GSTT_HOTKEY=CTRL+WIN` is the same as `CTRL+SUPER`. Logs go to `%LOCALAPPDATA%\gemini-speech-to-text\gemini-speech-to-text.log`.
 
 **Not yet tested on Windows.** It was written on Linux, and only the logic is unit-tested there. These need checking on a real Windows machine:
 - `uiohook-napi` loading and seeing Ctrl+Win in every app, including elevated (admin) windows. A non-admin process can't hook those, which is a Windows rule.
@@ -173,13 +173,13 @@ Settings are the same as on Linux. `FLOWCODE_MIC` picks a microphone by name (fr
 
 ## Tray app
 
-The tray app is the same engine with a tray icon and a Settings window. It's the easiest way to use flowcode day to day.
+The tray app is the same engine with a tray icon and a Settings window. It's the easiest way to use the app day to day.
 
 - **Tray icon:** gray when ready, red while recording, amber while transcribing. The menu has: the current status, a mode switch (Live / One-shot), Settings…, Start at login, Open log, and Quit.
 - **Settings:** API key, mode, hotkey, silence cutoff and start at login. On first launch with no key, Settings opens by itself.
   - The **API key** is encrypted with the OS keychain (Electron `safeStorage`: Secret Service/gnome-keyring on Linux, DPAPI on Windows) and saved in the app's config folder. It is never stored as plain text and never sent to the Settings page; the page can only tell whether a key exists. **Test** checks a key with one small Gemini request.
   - For development, the repo's `.env` (`GEMINI_API_KEY` / `VOICE_DEV_GEMINI_KEY`) still works when no key is saved.
-- **Start at login:** Linux writes `~/.config/autostart/flowcode.desktop`; Windows uses the standard login item.
+- **Start at login:** Linux writes `~/.config/autostart/gemini-speech-to-text.desktop`; Windows uses the standard login item.
 - **Errors** show as desktop notifications and in the tray menu. Details are in the log (Tray → Open log).
 
 Run it from the repo:
@@ -201,10 +201,19 @@ These write to `dist/`:
 
 | File | For |
 |---|---|
-| `flowcode-<version>.AppImage` | Any Linux. `chmod +x`, then double-click. |
-| `flowcode_<version>_amd64.deb` | Pop!_OS / Ubuntu / Debian: `sudo apt install ./flowcode_<version>_amd64.deb`. Pulls in python3, wl-clipboard, ydotool and pipewire. |
-| `flowcode Setup <version>.exe` | Windows (per-user install, no admin). Unsigned, so SmartScreen will warn ("More info" → "Run anyway"). |
+| `gemini-speech-to-text-<version>.AppImage` | Any Linux. `chmod +x`, then double-click. |
+| `gemini-speech-to-text_<version>_amd64.deb` | Pop!_OS / Ubuntu / Debian: `sudo apt install ./gemini-speech-to-text_<version>_amd64.deb`. Pulls in python3, wl-clipboard, ydotool and pipewire. Replaces the old `flowcode` package if it's installed. |
+| `Gemini Speech to Text Setup <version>.exe` | Windows (per-user install, no admin). Unsigned, so SmartScreen will warn ("More info" → "Run anyway"). |
 
 - **Linux needs:** your user in the `input` group, and `ydotoold` running for paste. See Permissions.
 - **Building Windows on Linux:** `dist:win` fetches the Windows ffmpeg (`scripts/fetch-win-ffmpeg.mjs`) and needs Wine, which builds fine on Linux. Electron itself doesn't run under Wine, so the Windows build has only been checked for contents, not run.
 - **No terminal needed:** the app works when started from a file manager, menu or autostart. `src/stdio-guard.js` sends console output to the log when there's no usable terminal, so missing stdout/stderr can't crash it.
+
+## Renamed from flowcode
+
+This app used to be called **flowcode**. Version 0.1.1 renames it everywhere, and nothing is lost:
+- **Settings and saved API key:** carried over automatically on the first start (the key is moved from the old keychain entry to the new one).
+- **Log folder:** moved to the new name.
+- **Autostart:** an old `flowcode` autostart entry is replaced with the new one.
+- **Environment variables:** now start with `GSTT_`. The old `FLOWCODE_` names still work as a fallback.
+- **Old .deb:** installing the new one removes the `flowcode` package. You can also remove it yourself with `sudo apt remove flowcode`.
