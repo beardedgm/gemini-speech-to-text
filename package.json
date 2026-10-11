@@ -56,7 +56,9 @@
       ],
       "category": "Utility",
       "icon": "assets/icon.png",
-      "synopsis": "Hold-to-talk dictation powered by Gemini"
+      "synopsis": "Hold-to-talk dictation powered by Gemini",
+      "maintainer": "BeardedGM",
+      "syncDesktopName": true
     },
     "deb": {
       "depends": [
@@ -87,6 +89,9 @@
       "perMachine": false,
       "runAfterFinish": true,
       "shortcutName": "flowcode"
-    }
-  }
+    },
+    "npmRebuild": false
+  },
+  "homepage": "https://github.com/beardedgm/gemini-speech-to-text",
+  "desktopName": "flowcode.desktop"
 }
