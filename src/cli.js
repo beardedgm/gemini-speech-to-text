@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // flowcode: hold a key, talk, let go, and the cleaned-up text is pasted where your cursor is.
 
+import './stdio-guard.js'; // first: survive being started without a terminal
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

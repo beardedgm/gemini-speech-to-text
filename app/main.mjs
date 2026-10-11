@@ -1,5 +1,7 @@
 // flowcode tray app: dictation engine + tray icon + Settings window.
 
+// Must stay the first import: repairs stdout/stderr before any dependency touches them.
+import { replaced as replacedStdio } from '../src/stdio-guard.js';
 import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, Notification, safeStorage, shell, Tray } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,7 +27,8 @@ let state = 'idle';
 let lastError = null;
 
 function log(msg, { private: isPrivate = false } = {}) {
-  console.log(new Date().toLocaleTimeString(), msg);
+  try { console.log(new Date().toLocaleTimeString(), msg); } catch { /* no usable stdout */ }
+  if (!logFile) return;
   const line = isPrivate ? msg.replace(/: [\s\S]*$/, ': [text omitted]') : msg;
   try { fs.appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
 }
@@ -226,6 +229,11 @@ function registerIpc() {
 
 // --- lifecycle ---------------------------------------------------------------------
 
+// Log unexpected errors instead of showing Electron's crash dialog; the tray
+// app should keep running (a failed dictation is reported via notification).
+process.on('uncaughtException', (err) => log(`Unexpected error: ${err?.stack || err}`));
+process.on('unhandledRejection', (err) => log(`Unhandled rejection: ${err?.stack || err}`));
+
 app.on('second-instance', openSettings);
 app.on('window-all-closed', () => { /* stay in the tray */ });
 app.on('before-quit', () => { service?.stop(); });
@@ -235,6 +243,7 @@ app.whenReady().then(async () => {
   platform = await loadPlatform();
   logFile = path.join(platform.logDir(), 'flowcode.log');
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  if (replacedStdio.length) log(`No usable ${replacedStdio.join('/')} (started without a terminal); console output goes to this log.`);
   registerIpc();
 
   tray = new Tray(icon('idle'));

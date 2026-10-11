@@ -170,3 +170,41 @@ Settings are the same as on Linux. `FLOWCODE_MIC` picks a microphone by name (fr
 - PowerShell clipboard speed (about 0.3–0.5 s per call adds paste delay) and Unicode round-trip. The tray app will switch to Electron's built-in clipboard.
 - Paste into UWP/Store apps and terminals (Windows Terminal pastes on Ctrl+V; older consoles may not).
 - There are no start/stop sounds or notifications on Windows yet; the tray app will add them.
+
+## Tray app
+
+The tray app is the same engine with a tray icon and a Settings window. It's the easiest way to use flowcode day to day.
+
+- **Tray icon:** gray when ready, red while recording, amber while transcribing. The menu has: the current status, a mode switch (Live / One-shot), Settings…, Start at login, Open log, and Quit.
+- **Settings:** API key, mode, hotkey, silence cutoff and start at login. On first launch with no key, Settings opens by itself.
+  - The **API key** is encrypted with the OS keychain (Electron `safeStorage`: Secret Service/gnome-keyring on Linux, DPAPI on Windows) and saved in the app's config folder. It is never stored as plain text and never sent to the Settings page; the page can only tell whether a key exists. **Test** checks a key with one small Gemini request.
+  - For development, the repo's `.env` (`GEMINI_API_KEY` / `VOICE_DEV_GEMINI_KEY`) still works when no key is saved.
+- **Start at login:** Linux writes `~/.config/autostart/flowcode.desktop`; Windows uses the standard login item.
+- **Errors** show as desktop notifications and in the tray menu. Details are in the log (Tray → Open log).
+
+Run it from the repo:
+
+```bash
+npm run app
+```
+
+### Installers
+
+```bash
+npm run dist:linux
+```
+```bash
+npm run dist:win
+```
+
+These write to `dist/`:
+
+| File | For |
+|---|---|
+| `flowcode-<version>.AppImage` | Any Linux. `chmod +x`, then double-click. |
+| `flowcode_<version>_amd64.deb` | Pop!_OS / Ubuntu / Debian: `sudo apt install ./flowcode_<version>_amd64.deb`. Pulls in python3, wl-clipboard, ydotool and pipewire. |
+| `flowcode Setup <version>.exe` | Windows (per-user install, no admin). Unsigned, so SmartScreen will warn ("More info" → "Run anyway"). |
+
+- **Linux needs:** your user in the `input` group, and `ydotoold` running for paste. See Permissions.
+- **Building Windows on Linux:** `dist:win` fetches the Windows ffmpeg (`scripts/fetch-win-ffmpeg.mjs`) and needs Wine, which builds fine on Linux. Electron itself doesn't run under Wine, so the Windows build has only been checked for contents, not run.
+- **No terminal needed:** the app works when started from a file manager, menu or autostart. `src/stdio-guard.js` sends console output to the log when there's no usable terminal, so missing stdout/stderr can't crash it.
