@@ -19,7 +19,13 @@ import { mergeConfig, SettingsStore } from './store.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ASSETS = path.join(ROOT, 'assets');
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// Only one copy may run. A second launch (e.g. from the app menu while the
+// tray app is already running) must exit right away: app.quit() is async, and
+// the second copy used to start its own engine first, briefly listening to
+// the keyboard alongside the first (double handling) or failing with
+// "No keyboards found" while shutting down.
+const isPrimaryInstance = app.requestSingleInstanceLock();
+if (!isPrimaryInstance) app.exit(0);
 
 // Development fallback: the repo's .env (GEMINI_API_KEY / VOICE_DEV_GEMINI_KEY, GSTT_* or legacy FLOWCODE_*).
 if (!app.isPackaged && fs.existsSync(path.join(ROOT, '.env'))) process.loadEnvFile(path.join(ROOT, '.env'));
@@ -249,6 +255,7 @@ app.on('window-all-closed', () => { /* stay in the tray */ });
 app.on('before-quit', () => { service?.stop(); });
 
 app.whenReady().then(async () => {
+  if (!isPrimaryInstance) return;
   migrateLegacyStateDir(); // ~/.local/state/flowcode -> new name (log)
   store = new SettingsStore(app.getPath('userData'), safeStorage);
   platform = await loadPlatform();

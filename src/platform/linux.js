@@ -1,6 +1,6 @@
 // Linux: evdev hotkey, PipeWire mic, wl-clipboard/xclip + ydotool/xdotool paste.
 
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { HoldToTalk, SUPER_KEYS, findKeyboards } from '../hotkey.js';
@@ -41,6 +41,16 @@ export function pasteText(text, opts) {
 
 export function pasteDescription() {
   return detectBackend();
+}
+
+// Name of the default PipeWire input, for messages like "Elgato Wave 3 sent no sound".
+export function microphoneName() {
+  return new Promise((resolve) => {
+    execFile('wpctl', ['inspect', '@DEFAULT_AUDIO_SOURCE@'], { timeout: 2000 }, (err, out) => {
+      if (err) return resolve(null);
+      resolve(String(out).match(/node\.description = "([^"]+)"/)?.[1] ?? null);
+    });
+  });
 }
 
 export function listKeyboards() {
