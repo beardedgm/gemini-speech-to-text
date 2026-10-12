@@ -24,12 +24,33 @@ export class Recorder {
     if (this.proc) throw new Error('Already recording');
     this.chunks = [];
     this.stderr = '';
-    this.proc = spawn(this.command, this.args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    this.proc.stdin.on('error', () => {});
-    this.proc.stdout.on('data', (d) => { this.chunks.push(d); onChunk?.(d); });
-    this.proc.stderr.on('data', (d) => { this.stderr += d; });
-    this.proc.on('error', (err) => { this.stderr += err.message; });
-    this.exited = new Promise((resolve) => this.proc.on('close', resolve));
+    this.onChunk = onChunk;
+    this.replaced = new WeakSet();
+    this.spawnProc();
+  }
+
+  spawnProc() {
+    const proc = spawn(this.command, this.args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    this.proc = proc;
+    proc.stdin.on('error', () => {});
+    proc.stdout.on('data', (d) => {
+      if (this.replaced.has(proc)) return; // output from a restarted-away process
+      this.chunks.push(d);
+      this.onChunk?.(d);
+    });
+    proc.stderr.on('data', (d) => { this.stderr += d; });
+    proc.on('error', (err) => { this.stderr += err.message; });
+    this.exited = new Promise((resolve) => proc.on('close', resolve));
+  }
+
+  // Replace a stalled capture process mid-recording, keeping audio so far.
+  restart() {
+    const old = this.proc;
+    if (!old) return false;
+    this.replaced.add(old);
+    this.spawnProc();
+    old.kill('SIGKILL');
+    return true;
   }
 
   // Stops recording and resolves with all captured PCM.

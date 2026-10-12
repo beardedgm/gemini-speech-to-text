@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configProblem, loadConfig } from '../src/config.js';
 import { DictationService } from '../src/engine.js';
+import { levelFrame } from '../src/micmonitor.js';
 import { checkKey } from '../src/gemini.js';
 import { parseHotkey } from '../src/hotkey.js';
 import { loadPlatform } from '../src/platform/index.js';
@@ -33,6 +34,7 @@ if (!app.isPackaged && fs.existsSync(path.join(ROOT, '.env'))) process.loadEnvFi
 let tray, store, platform, service, settingsWin, logFile;
 let state = 'idle';
 let lastError = null;
+let micWarning = null; // message while the mic isn't hearing anything during a hold
 
 function log(msg, { private: isPrivate = false } = {}) {
   try { console.log(new Date().toLocaleTimeString(), msg); } catch { /* no usable stdout */ }
@@ -61,16 +63,49 @@ function icon(s) {
 
 const STATE_LABEL = { idle: 'Ready', recording: 'Recording…', working: 'Transcribing…', setup: 'Needs setup', error: 'Error' };
 
+// Only touch the tray image when it actually changes: each change is a D-Bus
+// round trip to the panel (StatusNotifierItem on Linux).
+let currentIcon = null;
+function setTrayIcon(name) {
+  if (!tray || currentIcon === name) return;
+  currentIcon = name;
+  tray.setImage(icon(name));
+}
+
+// Live level meter while recording, at most ~10 updates per second.
+const LEVEL_FRAMES = 6;
+const LEVEL_INTERVAL_MS = 100;
+let lastLevelAt = 0;
+function showLevel(db) {
+  if (state !== 'recording' || micWarning) return;
+  const now = Date.now();
+  if (now - lastLevelAt < LEVEL_INTERVAL_MS) return;
+  lastLevelAt = now;
+  setTrayIcon(`level-${levelFrame(db, LEVEL_FRAMES)}`);
+}
+
+function stateIcon(shown) {
+  if (shown === 'recording') return micWarning ? 'mic-off' : 'level-0';
+  return shown === 'setup' || shown === 'error' ? 'working' : shown;
+}
+
 function refreshTray() {
   if (!tray) return;
   const config = currentConfig();
   const shown = configProblem(config) ? 'setup' : state;
-  tray.setImage(icon(shown === 'setup' || shown === 'error' ? 'working' : shown));
-  tray.setToolTip(`${APP_NAME}: ${STATE_LABEL[shown]}${shown === 'idle' ? ` (hold ${config.hotkey})` : ''}`);
+  setTrayIcon(stateIcon(shown));
+  const status = micWarning && shown === 'recording' ? 'Microphone not hearing you!' : STATE_LABEL[shown];
+  tray.setToolTip(`${APP_NAME}: ${status}${shown === 'idle' ? ` (hold ${config.hotkey})` : ''}`);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: `${APP_NAME}: ${STATE_LABEL[shown]}`, enabled: false },
+    { label: `${APP_NAME}: ${status}`, enabled: false },
     ...(lastError ? [{ label: lastError.slice(0, 80), enabled: false }] : []),
     { label: `Hold ${config.hotkey} to dictate`, enabled: false },
+    { type: 'separator' },
+    {
+      label: 'Retry last dictation',
+      enabled: Boolean(service?.canRetry) && state === 'idle',
+      click: () => service?.retryLast(),
+    },
     { type: 'separator' },
     {
       label: 'Mode',
@@ -99,6 +134,7 @@ function refreshTray() {
 function setState(s) {
   state = s;
   if (s !== 'idle') lastError = null;
+  if (s !== 'recording') micWarning = null;
   refreshTray();
 }
 
@@ -133,6 +169,15 @@ async function startService() {
     refreshTray();
     if (config.notify && Notification.isSupported()) new Notification({ title: APP_NAME, body: m, silent: true }).show();
   });
+  service.on('level', showLevel);
+  service.on('mic-warning', ({ message }) => {
+    micWarning = message;
+    refreshTray();
+    // Shown even with notifications off: this is about losing what you're saying right now.
+    if (Notification.isSupported()) new Notification({ title: 'Microphone not hearing you', body: message, silent: true, urgency: 'critical' }).show();
+  });
+  service.on('mic-ok', () => { micWarning = null; refreshTray(); });
+  service.on('retry-available', refreshTray);
   try {
     await service.start();
   } catch (e) {
