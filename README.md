@@ -89,6 +89,7 @@ Everything is also logged to `~/.local/state/gemini-speech-to-text/gemini-speech
 | `GSTT_NOTIFY` | `1` | `0` turns off error notifications. |
 | `GSTT_SOUND_START` | `1` | `0` turns off the sound when recording starts. |
 | `GSTT_SOUND_DONE` | `1` | `0` turns off the sound after the text is pasted. |
+| `GSTT_MIC` | (default input) | Linux: PipeWire input node name or serial. Windows: DirectShow mic name (see `devices`). |
 | `GSTT_DICTIONARY` | `dictionary.txt` | Path to your dictionary file. |
 | `GSTT_RESTORE_CLIPBOARD` | `1` | Set to `0` to leave the dictated text on the clipboard. |
 
@@ -210,6 +211,16 @@ These write to `dist/`:
 - **Linux needs:** your user in the `input` group, and `ydotoold` running for paste. See Permissions.
 - **Building Windows on Linux:** `dist:win` fetches the Windows ffmpeg (`scripts/fetch-win-ffmpeg.mjs`) and needs Wine, which builds fine on Linux. Electron itself doesn't run under Wine, so the Windows build has only been checked for contents, not run.
 - **No terminal needed:** the app works when started from a file manager, menu or autostart. `src/stdio-guard.js` sends console output to the log when there's no usable terminal, so missing stdout/stderr can't crash it.
+
+## Microphone feedback
+
+- **Live level in the tray:** while you hold the hotkey, the tray icon turns into a red level meter. Its bars move with your voice, updating about 10 times a second. If the bars stay dark while you talk, the mic isn't hearing you.
+- **Early warning:** half a second into a hold, the app checks that the mic is delivering real sound.
+  - **Muted** (PipeWire mute, including a USB mic's own mute button): you get an error sound right away, a crossed-out red mic in the tray, and a notification such as "Elgato Wave 3 Pro is muted. Unmute it to dictate."
+  - **Stuck** (no audio at all, or exact silence): the app first resets the mic up to 3 times without bothering you. A reset forces the input to suspend and resume, then restarts capture. Some USB mics, like the Elgato Wave 3, come back from PipeWire's idle suspend stuck like this. If it's still stuck after the resets, you get the same warning (worst case about 2 s in).
+  - **Clearing:** the warning clears by itself if sound comes back while you're still holding.
+- **Never lose a dictation:** if transcription fails or returns nothing even though there was real audio, the recording is kept, in memory and as `last-dictation.wav` next to the log, readable only by you. Tray → **Retry last dictation** re-sends it and pastes the result where your cursor is. The file is deleted after the next successful dictation.
+- **Pick a mic:** `GSTT_MIC` selects a specific input (a PipeWire node name or serial, from `wpctl status`). By default the app uses the system's default input.
 
 ## Renamed from flowcode
 

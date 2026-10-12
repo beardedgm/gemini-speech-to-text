@@ -81,8 +81,10 @@ test('DictationService: Ctrl+Super hold -> recording -> working -> paste after b
   p.hotkey.handleKey(LC, 0, 'k'); // stop; Super still held
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(p.pasted, []); // waits for Super to be released
+  const idle = new Promise((r) => svc.on('state', (st) => st === 'idle' && r()));
   p.hotkey.handleKey(META, 0, 'k');
   assert.equal(await pasted, 'Hello there.');
+  await idle;
   assert.deepEqual(p.pasted, ['Hello there.']);
   assert.deepEqual(states, ['recording', 'working', 'idle']);
   await svc.stop();
