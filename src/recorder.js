@@ -24,6 +24,7 @@ export class Recorder {
     if (this.proc) throw new Error('Already recording');
     this.chunks = [];
     this.stderr = '';
+    this.openError = null;
     this.onChunk = onChunk;
     this.replaced = new WeakSet();
     this.spawnProc();
@@ -32,15 +33,24 @@ export class Recorder {
   spawnProc() {
     const proc = spawn(this.command, this.args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.proc = proc;
+    let gotData = false;
     proc.stdin.on('error', () => {});
     proc.stdout.on('data', (d) => {
       if (this.replaced.has(proc)) return; // output from a restarted-away process
+      gotData = true;
       this.chunks.push(d);
       this.onChunk?.(d);
     });
     proc.stderr.on('data', (d) => { this.stderr += d; });
     proc.on('error', (err) => { this.stderr += err.message; });
-    this.exited = new Promise((resolve) => proc.on('close', resolve));
+    this.exited = new Promise((resolve) => proc.on('close', (code) => {
+      // Quit on its own, before being asked and without any audio: the
+      // device couldn't be opened (missing, in use, bad name...).
+      if (this.proc === proc && !gotData && code !== 0) {
+        this.openError = captureErrorSummary(this.stderr) || `${this.command} exited with code ${code}`;
+      }
+      resolve(code);
+    }));
   }
 
   // Replace a stalled capture process mid-recording, keeping audio so far.
@@ -63,13 +73,26 @@ export class Recorder {
     await this.exited;
     clearTimeout(timeout);
     const pcm = Buffer.concat(this.chunks);
-    if (pcm.length === 0) throw new Error(`Recording is empty${this.stderr ? `: ${this.stderr.trim()}` : ''}`);
+    if (pcm.length === 0) {
+      if (this.openError) throw Object.assign(new Error(`Couldn't open the microphone: ${this.openError}`), { openFailed: this.openError });
+      throw new Error(`Recording is empty${this.stderr ? `: ${this.stderr.trim()}` : ''}`);
+    }
     return pcm;
   }
 
   async cancel() {
     try { await this.stop(); } catch { /* nothing to keep */ }
   }
+}
+
+// A capture tool's stderr as one short line: drops ffmpeg's "[dshow @ 0x...]"
+// prefixes and the repeats left by restarts.
+export function captureErrorSummary(stderr) {
+  const lines = String(stderr).split(/\r?\n/)
+    .map((l) => l.replace(/^\[[^\]]*@\s*[0-9a-fx]+\]\s*/i, '').trim())
+    .filter(Boolean);
+  const text = [...new Set(lines)].join(' ');
+  return text.length > 200 ? `${text.slice(0, 197)}...` : text;
 }
 
 export function pcmSeconds(pcm) {
