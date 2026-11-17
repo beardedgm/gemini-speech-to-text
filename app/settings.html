@@ -49,6 +49,8 @@
   .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
   footer { display: flex; justify-content: space-between; align-items: center; padding-top: 16px; border-top: 1px solid var(--line); }
   .check { display: flex; gap: 8px; align-items: center; }
+  .status p { margin: 0 0 2px; }
+  button.recording { border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -75,8 +77,12 @@
 
   <section>
     <label class="title" for="hotkey">Hotkey</label>
-    <input id="hotkey" type="text" spellcheck="false">
-    <div class="hint">Keys to hold, joined with +. CTRL, SUPER (WIN), ALT and SHIFT match either side. Example: CTRL+SUPER, or KEY_RIGHTCTRL.</div>
+    <div class="row">
+      <input id="hotkey" type="text" spellcheck="false" aria-describedby="hotkeyHint hotkeyStatus">
+      <button id="record" type="button">Record</button>
+    </div>
+    <div id="hotkeyStatus" class="status" role="status" aria-live="polite"></div>
+    <div id="hotkeyHint" class="hint">Click Record, then press and release the keys you want to hold (Esc cancels). Or type them joined with +: CTRL, SUPER (WIN), ALT and SHIFT match either side, e.g. CTRL+SUPER or KEY_RIGHTCTRL.</div>
   </section>
 
   <section>

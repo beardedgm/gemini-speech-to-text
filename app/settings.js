@@ -10,6 +10,7 @@ async function load() {
   const s = await window.gstt.getSettings();
   document.querySelector(`input[name=mode][value=${s.mode}]`).checked = true;
   $('hotkey').value = s.hotkey;
+  await checkHotkey();
   $('silence').value = s.silenceDb;
   $('login').checked = s.startAtLogin;
   $('soundStart').checked = s.soundStart;
@@ -50,7 +51,68 @@ $('save').addEventListener('click', async () => {
   await load();
 });
 
+// --- hotkey: recorder + live check ---------------------------------------------
+
+let recording = false;
+
+function showIssues({ errors = [], warnings = [] }) {
+  const el = $('hotkeyStatus');
+  el.replaceChildren(...[...errors.map((t) => [t, 'err']), ...warnings.map((t) => [t, 'warn'])].map(([t, cls]) => {
+    const p = document.createElement('p');
+    p.textContent = t;
+    p.className = cls;
+    return p;
+  }));
+  el.className = 'status';
+}
+
+async function checkHotkey() {
+  showIssues(await window.gstt.checkHotkey($('hotkey').value));
+}
+
+let checkTimer;
+$('hotkey').addEventListener('input', () => {
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(checkHotkey, 250);
+});
+
+function setRecording(on) {
+  recording = on;
+  $('record').textContent = on ? 'Cancel' : 'Record';
+  $('record').classList.toggle('recording', on);
+  $('hotkey').disabled = on;
+  $('save').disabled = on;
+}
+
+$('record').addEventListener('click', async () => {
+  if (recording) return window.gstt.cancelRecordHotkey();
+  setRecording(true);
+  status($('hotkeyStatus'), 'Press and release your shortcut now. Dictation is paused until you do.');
+  const r = await window.gstt.recordHotkey();
+  setRecording(false);
+  if (r.spec) {
+    $('hotkey').value = r.spec;
+    showIssues(r.issues);
+    if (!r.issues.errors.length) status($('saveStatus'), 'Click Save to use the new hotkey.');
+  } else if (r.error) {
+    status($('hotkeyStatus'), r.error, 'err');
+  } else {
+    await checkHotkey(); // cancelled: show the current hotkey's state again
+  }
+  $('record').focus();
+});
+
+// While recording, the keys are for the recorder: don't let them type,
+// press buttons or close the window.
+for (const type of ['keydown', 'keyup', 'keypress']) {
+  window.addEventListener(type, (e) => {
+    if (!recording) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+}
+
 $('cancel').addEventListener('click', () => window.gstt.close());
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.gstt.close(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !recording) window.gstt.close(); });
 
 load();
