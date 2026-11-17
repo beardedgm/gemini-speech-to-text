@@ -17,7 +17,7 @@ export function loadConfig(env = process.env, root = process.cwd()) {
     liveModel: get('LIVE_MODEL') || DEFAULT_LIVE_MODEL,
     // Text-only cleanup of the live transcript.
     cleanupModel: get('CLEANUP_MODEL') || DEFAULT_CLEANUP_MODEL,
-    // Hold both (either side), like Flow's Ctrl+Win.
+    // Hold both (either side): Ctrl+Super, Ctrl+Win on Windows.
     hotkey: get('HOTKEY') || 'CTRL+SUPER',
     dictionary: path.resolve(root, get('DICTIONARY') || 'dictionary.txt'),
     restore: get('RESTORE_CLIPBOARD') !== '0',
