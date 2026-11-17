@@ -11,7 +11,10 @@ test('uiohook key codes map to the evdev codes used by hotkey specs', () => {
   assert.equal(mapUiohookKey(3675), 125);  // left Win
   assert.equal(mapUiohookKey(3676), 126);  // right Win
   assert.equal(mapUiohookKey(107), null);  // F24: our own Start-menu suppression tap, ignored
-  assert.ok(mapUiohookKey(47) >= 100000);  // V: "another key", never a hotkey
+  assert.equal(mapUiohookKey(47), 47);     // V: letters keep their scan code (= evdev code)
+  assert.equal(mapUiohookKey(91), 183);    // F13
+  assert.equal(mapUiohookKey(3667), 111);  // Delete
+  assert.ok(mapUiohookKey(3639) >= 100000); // Print Screen: "another key", never a hotkey
 });
 
 test('Ctrl+Win hold via mapped hook events: start, F24 tap ignored, stop', () => {

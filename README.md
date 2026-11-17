@@ -78,7 +78,7 @@ Everything is also logged to `~/.local/state/gemini-speech-to-text/gemini-speech
 
 | Variable | Default | Notes |
 |---|---|---|
-| `GSTT_HOTKEY` | `CTRL+SUPER` | Keys joined with `+`. `CTRL`, `SUPER` (`WIN`), `ALT` and `SHIFT` match either side. Exact evdev names also work, e.g. `KEY_RIGHTCTRL` or `KEY_F13`. |
+| `GSTT_HOTKEY` | `CTRL+SUPER` | Keys joined with `+`. `CTRL`, `SUPER` (`WIN`), `ALT` and `SHIFT` match either side. Also: letters, digits, `F1`–`F23`, `SPACE`, `TAB`, `ESC`, `DELETE`, `CAPSLOCK`, `SCROLLLOCK`, and exact names like `KEY_RIGHTCTRL`. `PAUSE` and `COMPOSE` work on Linux only. |
 | `GSTT_MODE` | `live` | `live` or `oneshot` (see "Live mode"). |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Model for one-shot transcription, and the fallback if live fails. |
 | `GSTT_LIVE_MODEL` | `gemini-3.8-live` | Live API model for live mode. `gemini-3.5-transcribe-live` also works. |
@@ -179,7 +179,7 @@ Settings are the same as on Linux. `GSTT_MIC` picks a microphone by name (from `
 The tray app is the same engine with a tray icon and a Settings window. It's the easiest way to use the app day to day.
 
 - **Tray icon:** gray when ready, red while recording, amber while transcribing. The menu has: the current status, a mode switch (Live / One-shot), Settings…, Start at login, Open log, and Quit.
-- **Settings:** API key, mode, hotkey, silence cutoff, sounds (start of recording and after pasting, each on or off) and start at login. The sounds can also be toggled from the tray menu (Sounds). On first launch with no key, Settings opens by itself.
+- **Settings:** API key, mode, hotkey (click **Record** and press the keys you want, or type them), silence cutoff, sounds (start of recording and after pasting, each on or off) and start at login. The sounds can also be toggled from the tray menu (Sounds). On first launch with no key, Settings opens by itself.
   - The **API key** is encrypted with the OS keychain (Electron `safeStorage`: Secret Service/gnome-keyring on Linux, DPAPI on Windows) and saved in the app's config folder. It is never stored as plain text and never sent to the Settings page; the page can only tell whether a key exists. **Test** checks a key with one small Gemini request.
   - For development, the repo's `.env` (`GEMINI_API_KEY` / `VOICE_DEV_GEMINI_KEY`) still works when no key is saved.
 - **Start at login:** Linux writes `~/.config/autostart/gemini-speech-to-text.desktop`; Windows uses the standard login item.

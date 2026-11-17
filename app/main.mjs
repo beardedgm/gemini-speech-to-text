@@ -12,6 +12,7 @@ import { DictationService } from '../src/engine.js';
 import { levelFrame } from '../src/micmonitor.js';
 import { checkKey } from '../src/gemini.js';
 import { parseHotkey } from '../src/hotkey.js';
+import { hotkeyIssues, recordShortcut } from '../src/hotkeyrecord.js';
 import { loadPlatform } from '../src/platform/index.js';
 import { APP_NAME, APP_SLUG, migrateLegacyStateDir } from '../src/names.js';
 import { migrateFromFlowcode } from './migrate.js';
@@ -34,6 +35,7 @@ if (!app.isPackaged && fs.existsSync(path.join(ROOT, '.env'))) process.loadEnvFi
 let tray, store, platform, service, settingsWin, logFile;
 let state = 'idle';
 let lastError = null;
+let recording = null; // { promise, cancel } while Settings records a new hotkey
 let micWarning = null; // message while the mic isn't hearing anything during a hold
 
 function log(msg, { private: isPrivate = false } = {}) {
@@ -241,7 +243,7 @@ function openSettings() {
   });
   settingsWin.loadFile(path.join(ROOT, 'app', 'settings.html'));
   settingsWin.once('ready-to-show', () => settingsWin.show());
-  settingsWin.on('closed', () => { settingsWin = null; });
+  settingsWin.on('closed', () => { settingsWin = null; recording?.cancel(); });
 }
 
 function registerIpc() {
@@ -258,10 +260,11 @@ function registerIpc() {
   ipcMain.handle('settings:save', async (_e, v) => {
     try {
       if (!['live', 'oneshot'].includes(v.mode)) throw new Error('Pick a mode.');
-      parseHotkey(v.hotkey); // throws on unknown keys
+      const { errors } = hotkeyIssues(String(v.hotkey ?? ''), hotkeyCheckOptions());
+      if (errors.length) throw new Error(errors[0]);
       if (!Number.isFinite(v.silenceDb) || v.silenceDb > -10 || v.silenceDb < -70) throw new Error('Silence cutoff must be between -70 and -10.');
       if (v.apiKey) store.setApiKey(v.apiKey);
-      store.update({ mode: v.mode, hotkey: v.hotkey.toUpperCase(), silenceDb: v.silenceDb, soundStart: Boolean(v.soundStart), soundDone: Boolean(v.soundDone) });
+      store.update({ mode: v.mode, hotkey: v.hotkey.split('+').map((k) => k.trim().toUpperCase()).join('+'), silenceDb: v.silenceDb, soundStart: Boolean(v.soundStart), soundDone: Boolean(v.soundDone) });
       if (v.startAtLogin !== isStartAtLogin()) setStartAtLogin(v.startAtLogin);
       await restartService();
       return { ok: true };
@@ -286,6 +289,41 @@ function registerIpc() {
   });
 
   ipcMain.handle('settings:close', () => settingsWin?.close());
+
+  ipcMain.handle('hotkey:check', (_e, spec) => hotkeyIssues(String(spec ?? ''), hotkeyCheckOptions()));
+
+  // Record a new hotkey: dictation is paused so the keys pressed here can't
+  // start a recording, then the next chord pressed anywhere is captured by the
+  // same listener dictation uses (raw evdev / the Windows hook), so Super/Win
+  // is seen even when the desktop grabs it first.
+  ipcMain.handle('hotkey:record', async () => {
+    if (recording) return { ok: false, error: 'Already recording a hotkey.' };
+    const old = service;
+    service = null;
+    await old?.stop();
+    state = 'idle';
+    refreshTray();
+    try {
+      // Listening "for" Super makes the platform layer suppress the Launcher /
+      // Start menu while Super is held, exactly as during dictation.
+      const listener = platform.createHotkey(parseHotkey('SUPER'), { onWarn: log });
+      recording = recordShortcut(listener, { platform: platform.name });
+      const r = await recording.promise;
+      if (r.spec) log(`Recorded hotkey ${r.spec}`);
+      return r.spec ? { ok: true, spec: r.spec, issues: hotkeyIssues(r.spec, hotkeyCheckOptions()) } : { ok: !r.error, ...r };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    } finally {
+      recording = null;
+      await startService();
+    }
+  });
+
+  ipcMain.handle('hotkey:cancel', () => { recording?.cancel(); });
+}
+
+function hotkeyCheckOptions() {
+  return { platform: platform.name, detectable: platform.DETECTABLE_KEYS ?? null };
 }
 
 // --- lifecycle ---------------------------------------------------------------------

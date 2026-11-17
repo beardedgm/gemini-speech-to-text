@@ -35,7 +35,17 @@ export const UIOHOOK_TO_EVDEV = {
   59: KEY_CODES.KEY_F1, 60: KEY_CODES.KEY_F2, 61: KEY_CODES.KEY_F3, 62: KEY_CODES.KEY_F4,
   63: KEY_CODES.KEY_F5, 64: KEY_CODES.KEY_F6, 65: KEY_CODES.KEY_F7, 66: KEY_CODES.KEY_F8,
   67: KEY_CODES.KEY_F9, 68: KEY_CODES.KEY_F10, 87: KEY_CODES.KEY_F11, 88: KEY_CODES.KEY_F12,
+  91: KEY_CODES.KEY_F13, 92: KEY_CODES.KEY_F14, 93: KEY_CODES.KEY_F15, 99: KEY_CODES.KEY_F16,
+  100: KEY_CODES.KEY_F17, 101: KEY_CODES.KEY_F18, 102: KEY_CODES.KEY_F19, 103: KEY_CODES.KEY_F20,
+  104: KEY_CODES.KEY_F21, 105: KEY_CODES.KEY_F22, 106: KEY_CODES.KEY_F23,
+  15: KEY_CODES.KEY_TAB, 70: KEY_CODES.KEY_SCROLLLOCK, 3667: KEY_CODES.KEY_DELETE,
 };
+// Letters and digits: libuiohook uses the same set-1 scan codes as evdev.
+for (const [name, code] of Object.entries(KEY_CODES)) {
+  if (/^KEY_[A-Z0-9]$/.test(name)) UIOHOOK_TO_EVDEV[code] = code;
+}
+// evdev codes the Windows hook can report (Pause and Compose have no uiohook code).
+export const DETECTABLE_KEYS = new Set(Object.values(UIOHOOK_TO_EVDEV));
 const UIOHOOK_F24 = 107;
 const UIOHOOK_V = 47;
 const UIOHOOK_CTRL = 29;
