@@ -163,6 +163,19 @@ export class DictationService extends EventEmitter {
       });
       mon.on('ok', () => { this.log('Microphone is hearing you again.'); this.emit('mic-ok'); });
       mon.on('warning', async (reason) => {
+        // The capture process couldn't open the device at all: say why;
+        // resets won't help and "Is it muted?" would mislead.
+        const openError = this.recorder.openError;
+        if (openError) {
+          const mic = await this.platform.microphoneName?.().catch(() => null);
+          if (this.monitor !== mon) return;
+          const message = `Couldn't open ${mic ?? 'the microphone'}: ${openError}`;
+          this.warned = true;
+          this.log(`Mic warning: ${message}`);
+          this.platform.beep('error');
+          this.emit('mic-warning', { reason: 'open-failed', mic, message });
+          return;
+        }
         // Muted (e.g. the mic's own mute button): say so; resets can't help.
         if (reason !== 'too-quiet' && (await this.platform.microphoneMuted?.().catch(() => null)) === true) {
           if (this.monitor !== mon) return;
@@ -248,7 +261,12 @@ export class DictationService extends EventEmitter {
       // Keep real audio (not silence) so the dictation can be retried.
       if (pcm && !skipReason(pcm, this.config)) this.keepForRetry(pcm);
       // An empty recording was already announced by the early mic warning.
-      if (!(this.warned && /Recording is empty/.test(e.message))) {
+      if (e.openFailed) {
+        if (!this.warned) {
+          const mic = await this.platform.microphoneName?.().catch(() => null);
+          this.emit('error', `Couldn't open ${mic ?? 'the microphone'}: ${e.openFailed}`);
+        }
+      } else if (!(this.warned && /Recording is empty/.test(e.message))) {
         this.emit('error', `Dictation failed: ${e.message}${this.canRetry ? ' (use "Retry last dictation")' : ''}`);
       }
     } finally {

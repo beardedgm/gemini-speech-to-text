@@ -109,29 +109,58 @@ export function ffmpegPath() {
 }
 
 // Parse `ffmpeg -list_devices true -f dshow -i dummy` output into audio device names.
-export function parseDshowAudioDevices(stderr) {
+// Each device is { name, altName }: altName is DirectShow's "Alternative name"
+// (an @device_... moniker), or null if ffmpeg didn't print one.
+export function parseDshowAudioDeviceList(stderr) {
   const devices = [];
   let inAudioSection = false;
+  let last = null; // the device a following "Alternative name" line belongs to
   for (const line of stderr.split(/\r?\n/)) {
+    const alt = line.match(/Alternative name\s+"([^"]+)"/i);
+    if (alt) { if (last) last.altName = alt[1]; continue; }
     // Newer ffmpeg: '[dshow @ ...] "Microphone (Realtek)" (audio)'
-    const tagged = line.match(/\]\s+"([^"]+)"\s+\(audio\)/);
-    if (tagged) { devices.push(tagged[1]); continue; }
+    const tagged = line.match(/\]\s+"([^"]+)"\s+\(([^)]*)\)\s*$/);
+    if (tagged) {
+      last = /audio/.test(tagged[2]) ? { name: tagged[1], altName: null } : null;
+      if (last) devices.push(last);
+      continue;
+    }
     // Older ffmpeg: a "DirectShow audio devices" header, then '[dshow @ ...]  "Name"'
-    if (/DirectShow audio devices/i.test(line)) { inAudioSection = true; continue; }
-    if (/DirectShow video devices/i.test(line)) { inAudioSection = false; continue; }
-    if (inAudioSection && !/Alternative name/i.test(line)) {
-      const m = line.match(/\]\s+"([^"]+)"/);
-      if (m) devices.push(m[1]);
+    if (/DirectShow audio devices/i.test(line)) { inAudioSection = true; last = null; continue; }
+    if (/DirectShow video devices/i.test(line)) { inAudioSection = false; last = null; continue; }
+    const m = line.match(/\]\s+"([^"]+)"/);
+    if (m) {
+      last = inAudioSection ? { name: m[1], altName: null } : null;
+      if (last) devices.push(last);
     }
   }
   return devices;
 }
 
-export async function listMicrophones() {
+export function parseDshowAudioDevices(stderr) {
+  return parseDshowAudioDeviceList(stderr).map((d) => d.name);
+}
+
+async function listMicrophoneDevices() {
   // ffmpeg exits non-zero here by design (no real input), and prints to stderr.
   const r = await execFileP(ffmpegPath(), ['-hide_banner', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'], { windowsHide: true })
     .catch((e) => e);
-  return parseDshowAudioDevices(String(r.stderr ?? ''));
+  return parseDshowAudioDeviceList(String(r.stderr ?? ''));
+}
+
+export async function listMicrophones() {
+  return (await listMicrophoneDevices()).map((d) => d.name);
+}
+
+// Pick GSTT_MIC (display or alternative name) or the first device.
+// Returns { name, input }: name for messages, input for ffmpeg. ffmpeg's dshow
+// input splits on ':' (video:audio), so "Microphone (Elgato Wave:3)" can't be
+// opened by name; the alternative name has no ':' and is used when known.
+export function resolveMicrophone(devices, wanted) {
+  const dev = wanted
+    ? devices.find((d) => d.name === wanted || d.altName === wanted) ?? { name: wanted, altName: null }
+    : devices[0];
+  return dev ? { name: dev.name, input: dev.altName ?? dev.name } : null;
 }
 
 export function ffmpegMicArgs(device) {
@@ -139,7 +168,7 @@ export function ffmpegMicArgs(device) {
     '-i', `audio=${device}`, '-ac', '1', '-ar', '16000', '-f', 's16le', '-'];
 }
 
-let micName;
+let mic; // { name, input } once resolved
 export function createRecorder() {
   const rec = new Recorder({
     command: ffmpegPath(),
@@ -149,10 +178,10 @@ export function createRecorder() {
   const start = rec.start.bind(rec);
   // Resolve the mic once (GSTT_MIC or the first DirectShow audio device).
   rec.prepare = async () => {
-    micName ??= envSetting(process.env, 'MIC') || (await listMicrophones())[0];
-    if (!micName) throw new Error('No microphone found (ffmpeg -list_devices). Set GSTT_MIC.');
-    rec.args = ffmpegMicArgs(micName);
-    return micName;
+    mic ??= resolveMicrophone(await listMicrophoneDevices(), envSetting(process.env, 'MIC'));
+    if (!mic) throw new Error('No microphone found (ffmpeg -list_devices). Set GSTT_MIC.');
+    rec.args = ffmpegMicArgs(mic.input);
+    return mic.name;
   };
   rec.start = (opts) => {
     if (!rec.args.length) throw new Error('Microphone not ready yet');
@@ -206,7 +235,7 @@ export function pasteDescription() {
 
 // The DirectShow mic in use (resolved when recording is first prepared).
 export async function microphoneName() {
-  return micName ?? null;
+  return mic?.name ?? null;
 }
 
 export function listKeyboards() {

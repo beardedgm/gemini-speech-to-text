@@ -76,3 +76,54 @@ test('Windows sounds use built-in media files with a system-sound fallback', () 
   assert.equal(soundScript('nope'), null);
   assert.deepEqual(Object.keys(WINDOWS_SOUNDS), ['start', 'done', 'error']);
 });
+
+import { parseDshowAudioDeviceList, resolveMicrophone } from '../src/platform/windows.js';
+
+// Real `ffmpeg -list_devices` output from a Windows laptop with an Elgato Wave:3.
+const ELGATO_LIST = [
+  '[dshow @ 000001b80ffd9e80] DirectShow video devices (some may be both video and audio devices)',
+  '[dshow @ 000001b80ffd9e80]  "HD WebCam"',
+  '[dshow @ 000001b80ffd9e80]     Alternative name "@device_pnp_\\\\?\\usb#vid_1bcf&pid_2c6b&mi_00#6&2218e88f&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\\global"',
+  '[dshow @ 000001b80ffd9e80] DirectShow audio devices',
+  '[dshow @ 000001b80ffd9e80]  "Microphone (Elgato Wave:3)"',
+  '[dshow @ 000001b80ffd9e80]     Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_{AEF32A67-693D-495D-8DE5-65D00DED3D8B}"',
+  '[dshow @ 000001b80ffd9e80]  "Microphone (Realtek(R) Audio)"',
+  '[dshow @ 000001b80ffd9e80]     Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_{82A54AD2-2DD0-4AA9-B602-DBE8C9E729A8}"',
+  'dummy: Immediate exit requested',
+].join('\r\n');
+const ELGATO_ALT = '@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_{AEF32A67-693D-495D-8DE5-65D00DED3D8B}';
+
+test('dshow device list keeps each audio device\'s alternative name (old and new ffmpeg)', () => {
+  const list = parseDshowAudioDeviceList(ELGATO_LIST);
+  assert.deepEqual(list.map((d) => d.name), ['Microphone (Elgato Wave:3)', 'Microphone (Realtek(R) Audio)']);
+  assert.equal(list[0].altName, ELGATO_ALT);
+  const modern = parseDshowAudioDeviceList([
+    '[dshow @ 01] "Integrated Camera" (video)',
+    '[dshow @ 01]   Alternative name "@device_pnp_cam"',
+    '[dshow @ 01] "Microphone (Elgato Wave:3)" (audio)',
+    '[dshow @ 01]   Alternative name "@device_cm_{X}\\wave_{Y}"',
+    '[dshow @ 01] "Headset (Jabra)" (audio)',
+  ].join('\n'));
+  assert.deepEqual(modern, [
+    { name: 'Microphone (Elgato Wave:3)', altName: '@device_cm_{X}\\wave_{Y}' },
+    { name: 'Headset (Jabra)', altName: null },
+  ]);
+});
+
+test('a mic name with a colon is opened by its alternative name; the friendly name stays for display', () => {
+  const list = parseDshowAudioDeviceList(ELGATO_LIST);
+  const mic = resolveMicrophone(list);
+  assert.equal(mic.name, 'Microphone (Elgato Wave:3)');
+  assert.equal(mic.input, ELGATO_ALT);
+  const i = ffmpegMicArgs(mic.input);
+  const input = i[i.indexOf('-i') + 1];
+  assert.equal(input, `audio=${ELGATO_ALT}`);
+  assert.ok(!input.slice('audio='.length).includes(':'), 'ffmpeg would split the device on ":"');
+  // GSTT_MIC matches the friendly or the alternative name.
+  assert.deepEqual(resolveMicrophone(list, 'Microphone (Realtek(R) Audio)'),
+    { name: 'Microphone (Realtek(R) Audio)', input: list[1].altName });
+  assert.equal(resolveMicrophone(list, ELGATO_ALT).name, 'Microphone (Elgato Wave:3)');
+  // Unknown GSTT_MIC (or no alt name): passed through as-is.
+  assert.deepEqual(resolveMicrophone(list, 'USB Mic'), { name: 'USB Mic', input: 'USB Mic' });
+  assert.equal(resolveMicrophone([]), null);
+});

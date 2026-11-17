@@ -253,3 +253,83 @@ test('a muted mic is reported as muted right away, without pointless resets', as
   await idle;
   await svc.stop();
 });
+
+import { captureErrorSummary } from '../src/recorder.js';
+
+test('capture error summary drops ffmpeg prefixes and repeats', () => {
+  const stderr = '[dshow @ 000001e5cf739880] Malformed dshow input string.\r\naudio=Microphone (Elgato Wave:3): I/O error\r\n'
+    + '[dshow @ 000002122b3d9880] Malformed dshow input string.\r\naudio=Microphone (Elgato Wave:3): I/O error\r\n';
+  assert.equal(captureErrorSummary(stderr), 'Malformed dshow input string. audio=Microphone (Elgato Wave:3): I/O error');
+  assert.equal(captureErrorSummary(''), '');
+});
+
+test('recorder: a capture process that exits on its own with no audio reports why it could not open the mic', async () => {
+  const rec = new Recorder({
+    command: process.execPath,
+    args: ['-e', 'process.stderr.write("[dshow @ 0000abcd] Could not find audio only device with name [X] among source devices of type audio.\\n"); process.exit(1)'],
+    stopProcess: (p) => p.kill(),
+  });
+  rec.start();
+  await rec.exited;
+  assert.match(rec.openError, /^Could not find audio only device/);
+  await assert.rejects(rec.stop(), (e) => e.openFailed === rec.openError && /Couldn't open the microphone/.test(e.message));
+});
+
+test('recorder: a normal stop with audio is not an open failure', async () => {
+  const rec = new Recorder({
+    command: process.execPath,
+    args: ['-e', 'process.stdout.write(Buffer.alloc(3200)); process.stdin.on("data", () => process.exit(0)); setTimeout(() => {}, 5000)'],
+    stopProcess: (p) => p.stdin.write('q'),
+  });
+  rec.start();
+  await new Promise((r) => setTimeout(r, 300));
+  const pcm = await rec.stop();
+  assert.equal(pcm.length, 3200);
+  assert.equal(rec.openError, null);
+});
+
+test('mic that cannot be opened: "Couldn\'t open <mic>" with the reason, no resets, no "Is it muted?"', async () => {
+  const t = fakeTimers();
+  const p = platformWith([], Buffer.alloc(0));
+  let resets = 0;
+  p.recoverMic = async () => { resets++; };
+  const reason = 'Malformed dshow input string. audio=Microphone (Elgato Wave:3): I/O error';
+  p.rec.openError = reason;
+  p.rec.stop = async () => { p.rec.proc = null; throw Object.assign(new Error(`Couldn't open the microphone: ${reason}`), { openFailed: reason }); };
+  const svc = new DictationService(loadConfig({ GEMINI_API_KEY: 'k', GSTT_MODE: 'oneshot' }), p, {
+    monitorFactory: () => new MicMonitor({ setTimer: t.setTimer, clearTimer: t.clearTimer }),
+    retryFile: null,
+    dictationFactory: () => ({ push() {}, abort() {}, finish: async () => ({ text: 'x' }) }),
+  });
+  await svc.start();
+  const warning = until(svc, 'mic-warning');
+  press(p.hotkey);
+  t.fire();
+  const w = await warning;
+  assert.equal(w.reason, 'open-failed');
+  assert.equal(w.message, `Couldn't open Elgato Wave 3 Pro: ${reason}`);
+  assert.doesNotMatch(w.message, /muted/i);
+  assert.deepEqual([resets, p.restarts], [0, 0]);
+  const errors = [];
+  svc.on('error', (m) => errors.push(m));
+  const idle = new Promise((r) => svc.on('state', (s) => s === 'idle' && r()));
+  release(p.hotkey);
+  await idle;
+  assert.deepEqual(errors, []); // already announced while holding
+  await svc.stop();
+});
+
+test('open failure noticed only on release still names the mic and the reason', async () => {
+  const p = platformWith([], Buffer.alloc(0));
+  p.rec.stop = async () => { p.rec.proc = null; throw Object.assign(new Error("Couldn't open the microphone: busy"), { openFailed: 'busy' }); };
+  const svc = new DictationService(loadConfig({ GEMINI_API_KEY: 'k', GSTT_MODE: 'oneshot' }), p, {
+    retryFile: null,
+    dictationFactory: () => ({ push() {}, abort() {}, finish: async () => ({ text: 'x' }) }),
+  });
+  await svc.start();
+  const err = until(svc, 'error');
+  press(p.hotkey); release(p.hotkey);
+  assert.equal(await err, "Couldn't open Elgato Wave 3 Pro: busy");
+  assert.deepEqual(p.pasted, []);
+  await svc.stop();
+});
