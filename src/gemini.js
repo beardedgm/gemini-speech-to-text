@@ -46,11 +46,32 @@ export function buildInstruction(dictionary = [], source = 'audio') {
   return lines.join('\n');
 }
 
+// Per-attempt time limits. The SDK has no timeout of its own (a stalled
+// request waited forever and left the app stuck on "Transcribing"), and by
+// default it retries 408/409/429/5xx and timeouts four times with backoff
+// (~6 s). Dictation is interactive, so allow one quick retry instead.
+export const CLEANUP_TIMEOUT_MS = 8000;
+export const MAX_RETRIES = 1;
+// Audio requests take longer as clips grow: 20 s, plus 1 s per 4 s of audio, at most 2 min.
+export function audioTimeoutMs(wavBytes) {
+  const seconds = wavBytes / 32000;
+  return Math.min(120000, Math.round(20000 + seconds * 250));
+}
+
+// Inline audio limit: Google documents 100 MB per request (base64 makes the
+// audio a third bigger). Tested 2026-11-22: a 10 min clip (25.5 MB encoded)
+// and a 41 min clip (105 MB encoded) were both accepted, so the older
+// "20 MB" note on the audio page no longer applies.
+export const INLINE_REQUEST_LIMIT_BYTES = 100e6;
+// Longest one-shot clip under that limit (16 kHz mono 16-bit WAV, base64): ~39 min.
+export const ONE_SHOT_LIMIT_SECONDS = Math.floor((INLINE_REQUEST_LIMIT_BYTES - 64 * 1024) / (32000 * 4 / 3));
+
 // wav: a file path or a Buffer holding WAV bytes.
 export async function transcribe(wav, { apiKey, model = DEFAULT_MODEL, dictionary = [] } = {}) {
-  const audio = (Buffer.isBuffer(wav) ? wav : fs.readFileSync(wav)).toString('base64');
+  const bytes = Buffer.isBuffer(wav) ? wav : fs.readFileSync(wav);
+  const audio = bytes.toString('base64');
   return generate({
-    apiKey, model,
+    apiKey, model, timeoutMs: audioTimeoutMs(bytes.length),
     instruction: buildInstruction(dictionary, 'audio'),
     input: [
       { type: 'text', text: 'Transcribe and clean up this dictation.' },
@@ -62,15 +83,16 @@ export async function transcribe(wav, { apiKey, model = DEFAULT_MODEL, dictionar
 export async function cleanupTranscript(transcript, { apiKey, model = DEFAULT_MODEL, dictionary = [] } = {}) {
   if (!transcript.trim()) return '';
   return generate({
-    apiKey, model,
+    apiKey, model, timeoutMs: CLEANUP_TIMEOUT_MS,
     instruction: buildInstruction(dictionary, 'transcript'),
     input: `Transcript:\n${transcript}`,
   });
 }
 
-async function generate({ apiKey, model, instruction, input }) {
-  if (!apiKey) throw new Error('GEMINI_API_KEY is not set (put it in .env)');
-  const client = new GoogleGenAI({ apiKey });
+// client: injectable for tests ({ interactions: { create } }).
+export async function generate({ apiKey, model, instruction, input, timeoutMs = CLEANUP_TIMEOUT_MS, maxRetries = MAX_RETRIES, client }) {
+  if (!apiKey && !client) throw new Error('GEMINI_API_KEY is not set (put it in .env)');
+  client ??= new GoogleGenAI({ apiKey });
   let interaction;
   try {
     interaction = await client.interactions.create({
@@ -79,8 +101,11 @@ async function generate({ apiKey, model, instruction, input }) {
       system_instruction: instruction,
       generation_config: { thinking_level: 'low' },
       input,
-    });
+    }, { timeout: timeoutMs, maxRetries });
   } catch (err) {
+    if (/timed? ?out|TimeoutError/i.test(`${err.name} ${err.message}`)) {
+      throw new Error(`Gemini didn't answer within ${Math.round(timeoutMs / 1000)} s${maxRetries ? ` (tried ${maxRetries + 1} times)` : ''}`);
+    }
     throw new Error(`Gemini ${err.status ?? ''} ${apiErrorMessage(err)}`.trim());
   }
   return cleanOutput(interaction.output_text);

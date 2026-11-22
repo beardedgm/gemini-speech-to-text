@@ -30,6 +30,25 @@ test('liveConfig: conversational model uses audio replies + manual turns; transc
   assert.deepEqual(liveConfig('gemini-3.5-transcribe-live').responseModalities, ['TEXT']);
 });
 
+test('liveConfig: dictionary terms go to the recognizer as speech biasing (capped at 1,000)', () => {
+  assert.equal(liveConfig('gemini-3.8-live').inputAudioTranscription.customVocabulary, undefined);
+  assert.deepEqual(liveConfig('gemini-3.8-live', { vocabulary: ['Quillon', 'Zephyrine'] }).inputAudioTranscription.customVocabulary, ['Quillon', 'Zephyrine']);
+  const t = liveConfig('gemini-3.5-transcribe-live', { vocabulary: ['Quillon'] }).inputAudioTranscription;
+  assert.deepEqual(t, { mode: 'VERBATIM', customVocabulary: ['Quillon'] });
+  const many = Array.from({ length: 1200 }, (_, i) => `term${i}`);
+  assert.equal(liveConfig('gemini-3.8-live', { vocabulary: many }).inputAudioTranscription.customVocabulary.length, 1000);
+});
+
+test('LiveTranscriber sends its vocabulary in the session setup', async () => {
+  let setup;
+  const ai = { live: { connect: async (opts) => { setup = opts.config; return { sendRealtimeInput() {}, close() {} }; } } };
+  const t = new LiveTranscriber({ ai, model: 'gemini-3.8-live', vocabulary: ['Quillon'] });
+  t.begin();
+  await t.sessionReady;
+  assert.deepEqual(setup.inputAudioTranscription.customVocabulary, ['Quillon']);
+  t.close();
+});
+
 test('joinTranscript adds spaces only where missing', () => {
   assert.equal(joinTranscript(['Hello.', 'World.']), 'Hello. World.');
   assert.equal(joinTranscript(['Hel', ' lo ', 'there']), 'Hel lo there');

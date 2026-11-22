@@ -16,7 +16,7 @@ It's a small Node app with one dependency (`@google/genai`). It was designed fro
 |---|---|
 | Hotkey | Reads key events straight from `/dev/input/event*` (evdev), so it works in every app on Wayland (COSMIC) and X11. Keyboards that connect later (Bluetooth) are picked up automatically. |
 | Recording | `pw-record` (PipeWire), 16 kHz mono WAV, recorded while the key is held. |
-| Transcription (default, `live`) | While you hold the keys, audio streams to `gemini-3.8-live` (Live API), which transcribes as you talk. On release the raw transcript goes to `gemini-3.5-flash-lite` (text only) for cleanup: punctuation, no filler words, and your dictionary as preferred spellings. Text is ready about 1 s after you let go. See "Live mode" below. |
+| Transcription (default, `live`) | While you hold the keys, audio streams to `gemini-3.8-live` (Live API), which transcribes as you talk. On release the raw transcript goes to `gemini-3.5-flash-lite` (text only) for cleanup: punctuation, no filler words, and your dictionary as preferred spellings (live mode also gives the dictionary to the recognizer). Text is ready about 1 s after you let go. See "Live mode" below. |
 | Transcription (`oneshot`) | One `gemini-3.8-flash` call with the audio inline, sent after you let go. `store: false`, low thinking. It's also the automatic fallback if a live session fails. |
 | Paste | Saves your clipboard → copies the text → presses Ctrl+V → restores your old clipboard after 0.4 s. Wayland uses `wl-copy` + `ydotool`; X11 uses `xclip` + `xdotool`. |
 
@@ -62,7 +62,7 @@ ydotoold &
 cp dictionary.example.txt dictionary.txt
 ```
 
-Put one name or term per line in `dictionary.txt`.
+Put one name or term per line in `dictionary.txt`. In live mode the list is sent to the speech recognizer as vocabulary hints, so names are heard right in the first place (Google allows up to 1,000 terms and works best with 100 or fewer). It is also used in the cleanup step as preferred spellings.
 
 ## Run
 
@@ -110,7 +110,7 @@ Everything is also logged to `~/.local/state/gemini-speech-to-text/gemini-speech
 - **Wait time:** the text appears after you let go, once Gemini replies (usually about 1–2 s). There's no live preview.
 - **Unplugged keyboards:** a keyboard plugged in after starting isn't picked up. Restart the app.
 - **Non-text clipboard:** if your clipboard held an image, it isn't restored, but it isn't overwritten until the paste either.
-- **Audio limit:** clips are sent inline, which caps them at about 20 MB (roughly 10 minutes of audio).
+- **Audio limit:** one-shot sends the whole clip in a single request, and Google allows up to 100 MB per request. That is about 39 minutes of dictation (a 41-minute clip was still accepted in testing). Past that, a warning goes in the log. In live mode, a Live session lasts at most 10 minutes; a longer dictation falls back to one-shot.
 
 ## Silence check
 Before anything is sent, the clip's loudest 50 ms must be louder than `GSTT_SILENCE_DB` (default `-40` dBFS). Quieter clips are dropped without calling Gemini, because models tend to invent text for silence.
@@ -125,7 +125,8 @@ How it works:
 - **Key down:** opens a Live API session and streams mic audio in 100 ms chunks.
 - **Speaking:** turn detection is manual, so a pause doesn't split your dictation. With automatic detection the model cut in mid-sentence.
 - **Key up:** ends the turn. The full transcript arrives within about 0.4 s, then gets the same text cleanup and dictionary. The model's spoken reply (`gemini-3.8-live` only replies in audio) is ignored, and the session is closed.
-- **Failures:** if the live session fails, the recorded audio is sent the one-shot way instead, so nothing is lost.
+- **Failures:** if the live session fails, the recorded audio is sent the one-shot way instead, so nothing is lost. If only the cleanup step fails, the transcript is typed as heard and you get a notification.
+- **Time limits:** every Gemini request has a time limit (8 s for cleanup, longer for audio) and is retried once on a timeout, a busy server (429/5xx) or a network error, so a stuck request can't leave the app on "Transcribing".
 
 Measured with `bench`: a 13 s dictation clip, replayed in real time, from key release to finished text.
 

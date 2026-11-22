@@ -11,13 +11,19 @@ import { GoogleGenAI, Modality } from '@google/genai';
 
 export const DEFAULT_LIVE_MODEL = 'gemini-3.8-live';
 
+// Google's limit for speech biasing (best results with 100 or fewer).
+export const MAX_VOCABULARY = 1000;
+
 // Dedicated transcribe models reply in text; conversational live models
-// (gemini-3.8-live) only accept audio replies.
-export function liveConfig(model) {
+// (gemini-3.8-live) only accept audio replies. vocabulary: dictionary.txt
+// terms, sent as speech biasing so names are recognised, not just fixed later.
+export function liveConfig(model, { vocabulary = [] } = {}) {
   const transcribeModel = /transcribe/i.test(model);
+  const transcription = transcribeModel ? { mode: 'VERBATIM' } : {};
+  if (vocabulary.length) transcription.customVocabulary = vocabulary.slice(0, MAX_VOCABULARY);
   return {
     responseModalities: [transcribeModel ? Modality.TEXT : Modality.AUDIO],
-    inputAudioTranscription: transcribeModel ? { mode: 'VERBATIM' } : {},
+    inputAudioTranscription: transcription,
     realtimeInputConfig: { automaticActivityDetection: { disabled: true } },
     ...(transcribeModel ? {} : {
       systemInstruction: { parts: [{ text: 'You are only listening. Reply with the single word "ok".' }] },
@@ -35,8 +41,9 @@ export function joinTranscript(pieces) {
 }
 
 export class LiveTranscriber extends EventEmitter {
-  constructor({ apiKey, model = DEFAULT_LIVE_MODEL, finalTimeoutMs = 6000, settleMs = 150, ai }) {
+  constructor({ apiKey, model = DEFAULT_LIVE_MODEL, finalTimeoutMs = 6000, settleMs = 150, ai, vocabulary = [] }) {
     super();
+    this.vocabulary = vocabulary;
     this.ai = ai ?? new GoogleGenAI({ apiKey });
     this.model = model;
     this.finalTimeoutMs = finalTimeoutMs;
@@ -58,7 +65,7 @@ export class LiveTranscriber extends EventEmitter {
     const onFailure = (err) => { this.error ??= err; fail(this.error); this.emit('final'); };
     const connecting = this.ai.live.connect({
       model: this.model,
-      config: liveConfig(this.model),
+      config: liveConfig(this.model, { vocabulary: this.vocabulary }),
       callbacks: {
         onmessage: (m) => this.onMessage(m),
         onerror: (e) => onFailure(new Error(`Live API error: ${e?.message ?? e}`)),
