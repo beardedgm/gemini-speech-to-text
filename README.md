@@ -200,6 +200,9 @@ npm run dist:linux
 ```bash
 npm run dist:win
 ```
+```bash
+npm run dist:win:portable
+```
 
 These write to `dist/`:
 
@@ -207,7 +210,10 @@ These write to `dist/`:
 |---|---|
 | `gemini-speech-to-text-<version>.AppImage` | Any Linux. `chmod +x`, then double-click. |
 | `gemini-speech-to-text_<version>_amd64.deb` | Pop!_OS / Ubuntu / Debian: `sudo apt install ./gemini-speech-to-text_<version>_amd64.deb`. Pulls in python3, wl-clipboard, ydotool and pipewire. Replaces the old `flowcode` package if it's installed. |
-| `Gemini Speech to Text Setup <version>.exe` | Windows (per-user install, no admin). Unsigned, so SmartScreen will warn ("More info" → "Run anyway"). |
+| `Gemini Speech to Text Setup <version>.exe` | Windows (per-user install, no admin). Unsigned, so SmartScreen will warn ("More info" → "Run anyway"). Smart App Control blocks it outright. |
+| `Gemini-Speech-to-Text-<version>-win-x64-portable.zip` | Windows, no installer: unzip anywhere and run `Gemini Speech to Text.exe`. Same app and settings as the installed one. A stopgap for PCs where Smart App Control blocks the unsigned installer (see below). |
+
+- **Portable zip:** built with `win.signAndEditExecutable=false`, so electron-builder leaves Electron's executable alone apart from the asar integrity resource: it shows as "Electron" in Task Manager, with Electron's icon. On a laptop with Smart App Control on, this ran (engine, keyboard hook, mic capture, saved key) where the installer was blocked. Smart App Control decides per file from Microsoft's cloud, so it can't be promised on every PC. Signing is the real fix. No Start menu entry or uninstaller: make a shortcut to the exe, and delete the folder to remove it.
 
 - **Linux needs:** your user in the `input` group, and `ydotoold` running for paste. See Permissions.
 - **Building Windows on Linux:** `dist:win` fetches the Windows ffmpeg (`scripts/fetch-win-ffmpeg.mjs`) and needs Wine, which builds fine on Linux. Electron itself doesn't run under Wine, so the Windows build has only been checked for contents, not run.
