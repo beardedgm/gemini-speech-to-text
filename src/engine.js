@@ -5,7 +5,7 @@
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
-import { cleanupTranscript, loadDictionary, transcribe } from './gemini.js';
+import { cleanupTranscript, loadDictionary, ONE_SHOT_LIMIT_SECONDS, transcribe } from './gemini.js';
 import { parseHotkey } from './hotkey.js';
 import { LiveTranscriber } from './live.js';
 import { MicMonitor, MIC_PROBLEMS } from './micmonitor.js';
@@ -36,14 +36,14 @@ export class Dictation {
   constructor(config, { mode = config.mode, log = () => {}, liveFactory } = {}) {
     this.config = config;
     this.log = log;
-    const makeLive = liveFactory ?? (() => new LiveTranscriber({ apiKey: config.apiKey, model: config.liveModel }));
+    const makeLive = liveFactory ?? (() => new LiveTranscriber({ apiKey: config.apiKey, model: config.liveModel, vocabulary: loadDictionary(config.dictionary) }));
     this.live = mode === 'live' ? makeLive() : null;
     this.live?.begin();
   }
 
   push(chunk) { this.live?.push(chunk); }
 
-  // Resolves with { text, raw?, transcriptMs?, fellBack? } or { skipped }.
+  // Resolves with { text, raw?, transcriptMs?, fellBack?, cleanupFailed? } or { skipped }.
   async finish(pcm) {
     const skipped = skipReason(pcm, this.config);
     if (skipped) { this.live?.abort(); return { skipped }; }
@@ -55,13 +55,32 @@ export class Dictation {
       } catch (e) {
         // The audio is still in memory, so fall back to a one-shot call.
         this.log(`Live transcription failed (${e.message}); falling back to one-shot.`);
+        this.warnIfTooLong(pcm);
         return { text: await transcribe(toWav(pcm), geminiOpts(this.config)), fellBack: true };
       }
       const transcriptMs = Date.now() - t0;
-      const text = await cleanupTranscript(raw, { ...geminiOpts(this.config), model: this.config.cleanupModel });
-      return { raw, text, transcriptMs };
+      try {
+        const text = await cleanupTranscript(raw, { ...geminiOpts(this.config), model: this.config.cleanupModel });
+        return { raw, text, transcriptMs };
+      } catch (e) {
+        // The words are already here: type them as heard rather than lose
+        // the dictation because the tidy-up step failed.
+        if (!raw.trim()) throw e;
+        return { raw, text: raw.trim(), transcriptMs, cleanupFailed: e.message };
+      }
     }
+    this.warnIfTooLong(pcm);
     return { text: await transcribe(toWav(pcm), geminiOpts(this.config)) };
+  }
+
+  // One-shot sends the whole clip in one request; past ~39 min it's over
+  // Google's 100 MB request limit. Try anyway (the audio is kept for retry).
+  warnIfTooLong(pcm) {
+    const secs = pcmSeconds(pcm);
+    if (secs > ONE_SHOT_LIMIT_SECONDS) {
+      this.log(`This recording is ${Math.round(secs / 60)} min long, over the ~${Math.floor(ONE_SHOT_LIMIT_SECONDS / 60)} min that fits in one request; Gemini may reject it.`);
+    }
+    return secs > ONE_SHOT_LIMIT_SECONDS;
   }
 
   abort() { this.live?.abort(); }
@@ -273,7 +292,7 @@ export class DictationService extends EventEmitter {
     try {
       pcm = await this.recorder.stop();
       const t0 = Date.now();
-      const { text, raw, skipped } = await this.current.finish(pcm);
+      const { text, raw, skipped, cleanupFailed } = await this.current.finish(pcm);
       if (skipped === MIC_SILENT) {
         const mic = await this.micName();
         this.log(`Not sent: ${skipped}${mic ? ` (${mic})` : ''}.`);
@@ -282,6 +301,10 @@ export class DictationService extends EventEmitter {
       }
       if (skipped) { this.log(`Not sent: ${skipped}.`); return; }
       if (raw !== undefined) this.log(`Live transcript (${Date.now() - t0} ms): ${raw}`, { private: true });
+      if (cleanupFailed) {
+        this.log(`Cleanup failed (${cleanupFailed}); pasting the transcript as heard.`);
+        this.emit('error', `Couldn't tidy up this dictation (${cleanupFailed}), so it was typed as heard.`);
+      }
       if (!text) {
         this.log('No speech detected.');
         this.keepForRetry(pcm); // real audio but no text: don't lose it
