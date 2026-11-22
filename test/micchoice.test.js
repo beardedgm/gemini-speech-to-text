@@ -8,7 +8,7 @@ import { loadConfig } from '../src/config.js';
 import { mergeConfig, validMic } from '../app/store.js';
 import { parseDshowAudioDeviceList, resolveMicrophone, FFMPEG_STARTUP_GRACE_MS } from '../src/platform/windows.js';
 import { dshowDeviceForEndpoint, endpointGuid } from '../src/platform/wincoreaudio.js';
-import { parsePactlSources, pwRecordArgs } from '../src/platform/linux.js';
+import { parsePactlSources, parseSourceMute, pwRecordArgs, sourceName } from '../src/platform/linux.js';
 import { RendererCapture } from '../app/rendercapture.js';
 import { DictationService } from '../src/engine.js';
 import { HoldToTalk } from '../src/hotkey.js';
@@ -338,7 +338,7 @@ test('engine: passes the configured mic to each dictation, logs which one opened
 test('engine: a mic Windows reports as muted is reported right away, without resets', async () => {
   const rec = new EventEmitter();
   let restarts = 0;
-  rec.start = () => { rec.proc = {}; };
+  rec.start = ({ onChunk }) => { rec.proc = {}; rec.onChunk = onChunk; };
   rec.restart = () => { restarts++; return true; };
   rec.stop = async () => { rec.proc = null; return Buffer.alloc(3200); };
   rec.cancel = async () => { rec.proc = null; };
@@ -370,6 +370,12 @@ test('engine: a mic Windows reports as muted is reported right away, without res
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].reason, 'muted');
   assert.equal(warnings[0].message, 'Microphone (Elgato Wave:3) is muted. Unmute it to dictate.');
+  // The monitor's own check then hears exact silence: still one warning
+  // (one notification), not a second "is muted" for the same hold.
+  rec.onChunk(Buffer.alloc(6400));
+  t.fire();
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(warnings.length, 1);
   assert.equal(restarts, 0);
   await svc.stop();
 });
@@ -388,4 +394,17 @@ test('testMicrophone (Recorder paths): live levels and a verdict; a missing pick
   assert.ok(levels.length > 0);
   const missing = await testMicrophone(platform, { id: 'x', name: 'Gone' }, { seconds: 0.01 });
   assert.equal(missing.kind, 'open-failed');
+});
+
+// WirePlumber 0.5's wpctl only takes numeric ids ("'alsa_input…' is not a
+// valid number"), so a pinned mic's mute state and name come from pactl.
+test('Linux pinned mic: pactl mute output and name lookup by node name or serial', () => {
+  assert.equal(parseSourceMute('Mute: yes\n'), true);
+  assert.equal(parseSourceMute('Mute: no\n'), false);
+  assert.equal(parseSourceMute(null), null);
+  assert.equal(parseSourceMute('Failed to get source information: No such entity'), null);
+  const devices = [{ id: 'alsa_input.usb-Elgato_Wave_3', name: 'Elgato Wave:3 Mono', altIds: ['71'] }];
+  assert.equal(sourceName(devices, { id: 'alsa_input.usb-Elgato_Wave_3', name: 'old' }), 'Elgato Wave:3 Mono');
+  assert.equal(sourceName(devices, { id: 71, name: 'old' }), 'Elgato Wave:3 Mono');
+  assert.equal(sourceName(devices, { id: 'gone', name: 'Webcam' }), 'Webcam');
 });

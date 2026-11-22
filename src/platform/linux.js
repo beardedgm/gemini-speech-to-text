@@ -49,9 +49,9 @@ function isMonitor(s) {
   return Boolean(s.monitor_of_sink && s.monitor_of_sink !== 'n/a');
 }
 
-function run(cmd, args) {
+function run(cmd, args, env = null) {
   return new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 2000, maxBuffer: 4 << 20 }, (err, out) => resolve(err ? null : String(out)));
+    execFile(cmd, args, { timeout: 2000, maxBuffer: 4 << 20, ...(env ? { env: { ...process.env, ...env } } : {}) }, (err, out) => resolve(err ? null : String(out)));
   });
 }
 
@@ -119,26 +119,34 @@ export function pasteDescription() {
 }
 
 // Name of a PipeWire input (default: the default input), for messages like
-// "Elgato Wave 3 sent no sound".
-export function microphoneName(mic = null) {
-  const target = mic?.id || '@DEFAULT_AUDIO_SOURCE@';
-  return new Promise((resolve) => {
-    execFile('wpctl', ['inspect', target], { timeout: 2000 }, (err, out) => {
-      if (err) return resolve(null);
-      resolve(String(out).match(/node\.description = "([^"]+)"/)?.[1] ?? null);
-    });
-  });
+// "Elgato Wave 3 sent no sound". A pinned mic is looked up in pactl's list:
+// wpctl (WirePlumber 0.5) only takes numeric ids, not node names.
+export async function microphoneName(mic = null) {
+  if (mic?.id) return sourceName(await listSources(), mic);
+  const out = await run('wpctl', ['inspect', '@DEFAULT_AUDIO_SOURCE@']);
+  return out?.match(/node\.description = "([^"]+)"/)?.[1] ?? null;
+}
+
+// devices from parsePactlSources; mic: { id, name }. The device's description,
+// else the name stored with the choice.
+export function sourceName(devices, mic) {
+  const d = devices.find((x) => x.id === mic.id || x.altIds?.includes(String(mic.id)));
+  return d?.name ?? mic.name ?? null;
 }
 
 // True if PipeWire reports the input muted (software mute, or a USB mic's own
 // mute button, e.g. tapping the Elgato Wave 3's dial). null if unknown.
-export function microphoneMuted(mic = null) {
-  const target = mic?.id || '@DEFAULT_AUDIO_SOURCE@';
-  return new Promise((resolve) => {
-    execFile('wpctl', ['get-volume', target], { timeout: 2000 }, (err, out) => {
-      resolve(err ? null : /\[MUTED\]/.test(String(out)));
-    });
-  });
+// A pinned mic goes through pactl, which takes node names and serials.
+export async function microphoneMuted(mic = null) {
+  if (mic?.id) return parseSourceMute(await run('pactl', ['get-source-mute', String(mic.id)], { LC_ALL: 'C' }));
+  const out = await run('wpctl', ['get-volume', '@DEFAULT_AUDIO_SOURCE@']);
+  return out == null ? null : /\[MUTED\]/.test(out);
+}
+
+// `pactl get-source-mute` output ("Mute: yes") -> true/false, null if unknown.
+export function parseSourceMute(out) {
+  const m = out?.match(/Mute:\s*(yes|no)/i);
+  return m ? m[1].toLowerCase() === 'yes' : null;
 }
 
 // Force the input to suspend and resume (via pipewire-pulse). Recovers USB

@@ -181,6 +181,7 @@ export class DictationService extends EventEmitter {
       this.monitor = mon;
       let recoveries = 0;
       let recoveredLogged = false;
+      let shownWarning = null; // message already shown this hold (cleared on 'ok')
       this.warned = false;
       mon.on('level', (db) => {
         if (recoveries && !recoveredLogged && db >= mon.floorDb) {
@@ -189,7 +190,7 @@ export class DictationService extends EventEmitter {
         }
         this.emit('level', db);
       });
-      mon.on('ok', () => { this.log('Microphone is hearing you again.'); this.emit('mic-ok'); });
+      mon.on('ok', () => { shownWarning = null; this.log('Microphone is hearing you again.'); this.emit('mic-ok'); });
       mon.on('warning', async (reason) => {
         // The capture process couldn't open the device at all: say why;
         // resets won't help and "Is it muted?" would mislead.
@@ -230,6 +231,10 @@ export class DictationService extends EventEmitter {
         const message = reason === 'muted'
           ? `${mic ?? 'Your microphone'} is muted. Unmute it to dictate.`
           : `${mic ?? 'Your microphone'} ${MIC_PROBLEMS[reason]}. Is it muted?`;
+        // The instant mute check at key-down and the monitor's later "exact
+        // silence" both end up here for a muted mic: notify once.
+        if (message === shownWarning) return;
+        shownWarning = message;
         this.warned = true;
         this.log(`Mic warning: ${message}`);
         this.platform.beep('error');
