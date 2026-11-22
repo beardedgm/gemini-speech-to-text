@@ -97,8 +97,9 @@ async function testRecord(seconds = 3) {
   const file = path.join(ROOT, 'test-recording.wav');
   const r = platform.createRecorder();
   if (r.prepare) log(`Microphone: ${await r.prepare()}`);
-  r.start();
-  log(`Recording ${seconds}s from the default mic...`);
+  r.on?.('mic', ({ name, fallback }) => log(`Opened ${name ?? 'the default mic'}${fallback ? ` (${fallback.wanted.name} isn't there)` : ''}.`));
+  r.start({ mic: config.mic });
+  log(`Recording ${seconds}s from ${config.mic ? config.mic.name : 'the default mic'}...`);
   await new Promise((res) => setTimeout(res, seconds * 1000));
   const pcm = await r.stop();
   fs.writeFileSync(file, toWav(pcm));
@@ -120,7 +121,10 @@ async function transcribeFile(file) {
 
 async function devices() {
   for (const k of platform.listKeyboards()) console.log(`keyboard: ${k.path}  ${k.name}`);
-  if (platform.listMicrophones) for (const m of await platform.listMicrophones()) console.log(`microphone: ${m}`);
+  if (platform.listMicrophones) {
+    const { devices: mics, defaultName } = await platform.listMicrophones();
+    for (const m of mics) console.log(`microphone: ${m.name}${m.name === defaultName ? '  (default)' : ''}  [${m.id}]`);
+  }
 }
 
 const [cmd = 'run', ...args] = process.argv.slice(2);

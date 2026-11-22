@@ -124,9 +124,13 @@ test('a mic name with a colon is opened by its alternative name; the friendly na
   assert.ok(!input.slice('audio='.length).includes(':'), 'ffmpeg would split the device on ":"');
   // GSTT_MIC matches the friendly or the alternative name.
   assert.deepEqual(resolveMicrophone(list, 'Microphone (Realtek(R) Audio)'),
-    { name: 'Microphone (Realtek(R) Audio)', input: list[1].altName });
+    { name: 'Microphone (Realtek(R) Audio)', input: list[1].altName, fallback: null });
   assert.equal(resolveMicrophone(list, ELGATO_ALT).name, 'Microphone (Elgato Wave:3)');
-  // Unknown GSTT_MIC (or no alt name): passed through as-is.
-  assert.deepEqual(resolveMicrophone(list, 'USB Mic'), { name: 'USB Mic', input: 'USB Mic' });
+  // A mic that isn't there: the default is used, and the fallback is reported.
+  const missing = resolveMicrophone(list, 'USB Mic');
+  assert.equal(missing.name, 'Microphone (Elgato Wave:3)');
+  assert.equal(missing.fallback.reason, 'not connected');
+  // Listing failed (no devices): the name is tried as given.
+  assert.deepEqual(resolveMicrophone([], 'USB Mic'), { name: 'USB Mic', input: 'USB Mic', fallback: null });
   assert.equal(resolveMicrophone([]), null);
 });

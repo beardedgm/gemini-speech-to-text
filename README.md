@@ -89,7 +89,7 @@ Everything is also logged to `~/.local/state/gemini-speech-to-text/gemini-speech
 | `GSTT_NOTIFY` | `1` | `0` turns off error notifications. |
 | `GSTT_SOUND_START` | `1` | `0` turns off the sound when recording starts. |
 | `GSTT_SOUND_DONE` | `1` | `0` turns off the sound after the text is pasted. |
-| `GSTT_MIC` | (default input) | Linux: PipeWire input node name or serial. Windows: DirectShow mic name (see `devices`). |
+| `GSTT_MIC` | (system default) | Pins one mic. Linux: PipeWire input node name or serial. Windows: mic name or DirectShow id (see `devices`). A mic picked in the tray app's Settings wins over it, and Settings shows when it's set. |
 | `GSTT_DICTIONARY` | `dictionary.txt` | Path to your dictionary file. |
 | `GSTT_RESTORE_CLIPBOARD` | `1` | Set to `0` to leave the dictated text on the clipboard. |
 
@@ -148,7 +148,7 @@ The Gemini core is shared by both systems: live and one-shot modes, cleanup, dic
 |---|---|---|
 | Hotkey | evdev (`/dev/input`) | Global low-level keyboard hook (`uiohook-napi`, prebuilt) |
 | Start menu / Launcher | Taps F24 through `/dev/uinput` | Taps F24 through the hook (SendInput) while Win is held |
-| Microphone | `pw-record` | Bundled ffmpeg (`@ffmpeg-installer/win32-x64`, installed only on Windows), DirectShow |
+| Microphone | `pw-record` | Tray app: Chromium `getUserMedia` in a hidden window (WASAPI). CLI, and fallback: bundled ffmpeg (`@ffmpeg-installer/win32-x64`), DirectShow |
 | Paste | wl-clipboard/xclip + ydotool/xdotool | PowerShell `Get-/Set-Clipboard` + SendInput Ctrl+V |
 
 To try it:
@@ -164,7 +164,7 @@ To try it:
 3. Optional check: `node src\cli.js devices` should list your microphone(s). `node src\cli.js test-record 3` records a test clip.
 4. Run `npm start`. Click into Notepad, hold **Ctrl+Win**, talk, and let go.
 
-Settings are the same as on Linux. `GSTT_MIC` picks a microphone by name (from `devices`); the default is the first one. `GSTT_HOTKEY=CTRL+WIN` is the same as `CTRL+SUPER`. Logs go to `%LOCALAPPDATA%\gemini-speech-to-text\gemini-speech-to-text.log`.
+Settings are the same as on Linux. By default the Windows default recording device is used (Sound settings), looked up at each dictation. `GSTT_MIC` pins a microphone by name or DirectShow id (from `devices`). `GSTT_HOTKEY=CTRL+WIN` is the same as `CTRL+SUPER`. Logs go to `%LOCALAPPDATA%\gemini-speech-to-text\gemini-speech-to-text.log`.
 
 **Not yet tested on Windows.** It was written on Linux, and only the logic is unit-tested there. These need checking on a real Windows machine:
 - `uiohook-napi` loading and seeing Ctrl+Win in every app, including elevated (admin) windows. A non-admin process can't hook those, which is a Windows rule.
@@ -220,7 +220,10 @@ These write to `dist/`:
   - **Stuck** (no audio at all, or exact silence): the app first resets the mic up to 3 times without bothering you. A reset forces the input to suspend and resume, then restarts capture. Some USB mics, like the Elgato Wave 3, come back from PipeWire's idle suspend stuck like this. If it's still stuck after the resets, you get the same warning (worst case about 2 s in).
   - **Clearing:** the warning clears by itself if sound comes back while you're still holding.
 - **Never lose a dictation:** if transcription fails or returns nothing even though there was real audio, the recording is kept, in memory and as `last-dictation.wav` next to the log, readable only by you. Tray → **Retry last dictation** re-sends it and pastes the result where your cursor is. The file is deleted after the next successful dictation.
-- **Pick a mic:** `GSTT_MIC` selects a specific input (a PipeWire node name or serial, from `wpctl status`). By default the app uses the system's default input.
+- **Pick a mic:** Settings → **Microphone** lists the mics connected now, by name, with **System default (currently: …)** first. It's the default choice and follows your system's sound settings at the moment each dictation starts, so switching the default or plugging a mic in or out needs no restart. The list updates when devices come and go. A specific pick is remembered by its id and name; if it's missing or won't open when you start dictating, the system default is used and a notification says which mic was used.
+- **Test a mic:** the **Test** button beside the picker listens for 3 seconds with a live level meter, then says "Hearing you", "No sound from this mic" or "Couldn't open it: <reason>". **Check all mics** listens to every mic at once and marks which ones are sending sound.
+- **GSTT_MIC:** still pins a mic (a PipeWire node name or serial, or on Windows a mic name or DirectShow id). Settings shows when it's set; a mic saved in Settings, including System default, wins over it.
+- **Windows capture:** the tray app records through Chromium (`getUserMedia` in a hidden window): it opens a mic in about 40 ms and delivers audio in about 90 ms, against about 450 ms for ffmpeg/DirectShow, so the first word isn't lost. The mic is opened only while you hold the hotkey (or test), so Windows' "microphone in use" icon is off at rest. Windows mute is checked through Core Audio and reported at once. ffmpeg is still used by the CLI, and by the tray app if its capture window can't start; it gets 1.5 s to start before a mic counts as dead (it needs about 450 ms).
 
 ## Renamed from flowcode
 

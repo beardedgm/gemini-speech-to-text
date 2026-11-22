@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { HoldToTalk, SUPER_KEYS, findKeyboards } from '../hotkey.js';
 import { KeyTap } from '../keytap.js';
-import { APP_NAME, envSetting, stateDir } from '../names.js';
+import { APP_NAME, stateDir } from '../names.js';
+import { DEFAULT_MIC, isDefaultMic, micFromEnv, resolveMic } from '../mics.js';
 import { Recorder } from '../recorder.js';
 import { detectBackend, pasteText as pasteWith } from '../paste.js';
 
@@ -31,12 +32,82 @@ export function createHotkey(keys, { onWarn } = {}) {
   return hk;
 }
 
-// GSTT_MIC picks a PipeWire input by node name or serial (see `wpctl status`);
-// default is the system's default input.
+// PipeWire inputs (not monitors of outputs) from `pactl -f json list sources`:
+// [{ id: node name, name: description }].
+export function parsePactlSources(json) {
+  let list;
+  try { list = JSON.parse(json); } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((s) => s && typeof s.name === 'string' && !isMonitor(s))
+    .map((s) => ({ id: s.name, name: s.description || s.properties?.['node.description'] || s.name, altIds: s.properties?.['object.serial'] ? [String(s.properties['object.serial'])] : [] }));
+}
+
+function isMonitor(s) {
+  if (s.name.endsWith('.monitor')) return true;
+  if (s.properties?.['device.class'] === 'monitor') return true;
+  return Boolean(s.monitor_of_sink && s.monitor_of_sink !== 'n/a');
+}
+
+function run(cmd, args, env = null) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout: 2000, maxBuffer: 4 << 20, ...(env ? { env: { ...process.env, ...env } } : {}) }, (err, out) => resolve(err ? null : String(out)));
+  });
+}
+
+async function listSources() {
+  const out = await run('pactl', ['-f', 'json', 'list', 'sources']);
+  return out ? parsePactlSources(out) : [];
+}
+
+// Mics for the Settings picker, plus the current default's name.
+export async function listMicrophones() {
+  const [devices, def] = await Promise.all([listSources(), run('pactl', ['get-default-source'])]);
+  const defName = def?.trim();
+  return { devices, defaultName: devices.find((d) => d.id === defName)?.name ?? (await microphoneName()) };
+}
+
+// pw-record arguments for a choice: no --target follows the default input
+// live, so "System default" needs nothing resolved.
+export function pwRecordArgs(target = null) {
+  return ['--rate=16000', '--channels=1', '--format=s16', ...(target ? [`--target=${target}`] : []), '--raw', '-'];
+}
+
+// A chosen mic that isn't there: PipeWire would quietly pick something, so
+// check the list right after capture starts (no delay at key-down), and if
+// the choice is missing, switch to the default and say so.
 export function createRecorder() {
-  const target = envSetting(process.env, 'MIC');
-  if (!target) return new Recorder();
-  return new Recorder({ args: ['--rate=16000', '--channels=1', '--format=s16', `--target=${target}`, '--raw', '-'] });
+  const rec = new Recorder({
+    argsFor: (mic) => {
+      const choice = mic ?? micFromEnv();
+      rec.micId = isDefaultMic(choice) ? null : choice.id;
+      rec.micName = isDefaultMic(choice) ? null : choice.name;
+      return pwRecordArgs(rec.micId);
+    },
+  });
+  const start = rec.start.bind(rec);
+  rec.start = (opts = {}) => {
+    start(opts);
+    const gen = rec.generation;
+    const choice = rec.mic ?? micFromEnv();
+    listSources().then(async (devices) => {
+      if (!rec.proc || rec.generation !== gen) return;
+      if (isDefaultMic(choice)) {
+        rec.emit('mic', { name: await microphoneName(), fallback: null });
+        return;
+      }
+      const { device, fallback } = devices.length ? resolveMic(devices, choice) : { device: { id: choice.id, name: choice.name }, fallback: null };
+      if (fallback) {
+        rec.restart({ mic: DEFAULT_MIC }); // not null: that would mean "GSTT_MIC" again
+        rec.emit('mic', { name: await microphoneName(), fallback });
+      } else {
+        if (device.id !== rec.micId) rec.restart({ mic: { id: device.id, name: device.name } });
+        rec.micName = device.name;
+        rec.emit('mic', { name: device.name, fallback: null });
+      }
+    });
+  };
+  return rec;
 }
 
 export function pasteText(text, opts) {
@@ -47,32 +118,41 @@ export function pasteDescription() {
   return detectBackend();
 }
 
-// Name of the default PipeWire input, for messages like "Elgato Wave 3 sent no sound".
-export function microphoneName() {
-  const target = envSetting(process.env, 'MIC') || '@DEFAULT_AUDIO_SOURCE@';
-  return new Promise((resolve) => {
-    execFile('wpctl', ['inspect', target], { timeout: 2000 }, (err, out) => {
-      if (err) return resolve(null);
-      resolve(String(out).match(/node\.description = "([^"]+)"/)?.[1] ?? null);
-    });
-  });
+// Name of a PipeWire input (default: the default input), for messages like
+// "Elgato Wave 3 sent no sound". A pinned mic is looked up in pactl's list:
+// wpctl (WirePlumber 0.5) only takes numeric ids, not node names.
+export async function microphoneName(mic = null) {
+  if (mic?.id) return sourceName(await listSources(), mic);
+  const out = await run('wpctl', ['inspect', '@DEFAULT_AUDIO_SOURCE@']);
+  return out?.match(/node\.description = "([^"]+)"/)?.[1] ?? null;
+}
+
+// devices from parsePactlSources; mic: { id, name }. The device's description,
+// else the name stored with the choice.
+export function sourceName(devices, mic) {
+  const d = devices.find((x) => x.id === mic.id || x.altIds?.includes(String(mic.id)));
+  return d?.name ?? mic.name ?? null;
 }
 
 // True if PipeWire reports the input muted (software mute, or a USB mic's own
 // mute button, e.g. tapping the Elgato Wave 3's dial). null if unknown.
-export function microphoneMuted() {
-  const target = envSetting(process.env, 'MIC') || '@DEFAULT_AUDIO_SOURCE@';
-  return new Promise((resolve) => {
-    execFile('wpctl', ['get-volume', target], { timeout: 2000 }, (err, out) => {
-      resolve(err ? null : /\[MUTED\]/.test(String(out)));
-    });
-  });
+// A pinned mic goes through pactl, which takes node names and serials.
+export async function microphoneMuted(mic = null) {
+  if (mic?.id) return parseSourceMute(await run('pactl', ['get-source-mute', String(mic.id)], { LC_ALL: 'C' }));
+  const out = await run('wpctl', ['get-volume', '@DEFAULT_AUDIO_SOURCE@']);
+  return out == null ? null : /\[MUTED\]/.test(out);
+}
+
+// `pactl get-source-mute` output ("Mute: yes") -> true/false, null if unknown.
+export function parseSourceMute(out) {
+  const m = out?.match(/Mute:\s*(yes|no)/i);
+  return m ? m[1].toLowerCase() === 'yes' : null;
 }
 
 // Force the input to suspend and resume (via pipewire-pulse). Recovers USB
 // mics that came back from PipeWire's idle suspend delivering nothing/zeros.
-export function recoverMic() {
-  const source = envSetting(process.env, 'MIC') || '@DEFAULT_SOURCE@';
+export function recoverMic(mic = null) {
+  const source = mic?.id || '@DEFAULT_SOURCE@';
   const pactl = (state) => new Promise((resolve) => {
     execFile('pactl', ['suspend-source', source, state], { timeout: 2000 }, () => resolve());
   });

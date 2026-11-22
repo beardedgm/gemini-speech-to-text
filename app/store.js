@@ -5,7 +5,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const SETTING_KEYS = ['mode', 'hotkey', 'silenceDb', 'startAtLogin', 'soundStart', 'soundDone'];
+export const SETTING_KEYS = ['mode', 'hotkey', 'silenceDb', 'startAtLogin', 'soundStart', 'soundDone', 'mic'];
+
+// A saved mic choice: { id, name } (id 'default' = System default).
+export function validMic(mic) {
+  return Boolean(mic && typeof mic.id === 'string' && mic.id && typeof (mic.name ?? '') === 'string');
+}
 
 export class SettingsStore {
   // safeStorage is injected so this can be tested without Electron.
@@ -64,6 +69,7 @@ export class SettingsStore {
 }
 
 // Settings saved in the app win over .env; the stored key wins over env keys.
+// A mic saved in Settings (even "System default") wins over GSTT_MIC.
 export function mergeConfig(envConfig, settings, storedKey) {
   return {
     ...envConfig,
@@ -72,6 +78,7 @@ export function mergeConfig(envConfig, settings, storedKey) {
     ...(Number.isFinite(settings.silenceDb) ? { silenceDb: settings.silenceDb } : {}),
     ...(typeof settings.soundStart === 'boolean' ? { soundStart: settings.soundStart } : {}),
     ...(typeof settings.soundDone === 'boolean' ? { soundDone: settings.soundDone } : {}),
+    ...(validMic(settings.mic) ? { mic: { id: settings.mic.id, name: settings.mic.name ?? settings.mic.id } } : {}),
     apiKey: storedKey || envConfig.apiKey,
   };
 }

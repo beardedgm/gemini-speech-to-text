@@ -31,9 +31,14 @@ export function chunkLevelDb(chunk) {
 export class MicMonitor extends EventEmitter {
   // floorDb: below this the mic is treated as not hearing anything. A working
   // mic in a quiet room is around -55 dBFS; a muted one is exactly -Infinity.
-  constructor({ checkAfterMs = 1000, floorDb = -70, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+  // graceMs: capture tools that are slow to start (ffmpeg/dshow takes ~450 ms
+  // to deliver its first audio) get this long, in total, to send at least
+  // minBytes before "no audio" / "silent" is judged. Defaults to checkAfterMs.
+  constructor({ checkAfterMs = 1000, graceMs = checkAfterMs, minBytes = 4800, floorDb = -70, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
     super();
     this.checkAfterMs = checkAfterMs;
+    this.graceMs = Math.max(graceMs, checkAfterMs);
+    this.minBytes = minBytes;
     this.floorDb = floorDb;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
@@ -49,10 +54,15 @@ export class MicMonitor extends EventEmitter {
 
   // Look again after another checkAfterMs (e.g. after restarting capture).
   schedule() {
-    this.clearTimer(this.timer);
     this.bytes = 0;
     this.maxDb = -Infinity;
-    this.timer = this.setTimer(() => this.check(), this.checkAfterMs);
+    this.waited = 0;
+    this.wait(this.checkAfterMs);
+  }
+
+  wait(ms) {
+    this.clearTimer(this.timer);
+    this.timer = this.setTimer(() => { this.waited += ms; this.check(); }, ms);
   }
 
   push(chunk) {
@@ -76,6 +86,11 @@ export class MicMonitor extends EventEmitter {
 
   check() {
     if (this.stopped) return;
+    // Still starting up: too little audio to judge yet, and inside the grace period.
+    if (this.bytes < this.minBytes && this.waited < this.graceMs) {
+      this.wait(Math.min(100, this.graceMs - this.waited));
+      return;
+    }
     const p = this.problem();
     if (p && p !== this.warning) {
       this.warning = p;

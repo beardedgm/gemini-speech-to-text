@@ -51,6 +51,15 @@
   .check { display: flex; gap: 8px; align-items: center; }
   .status p { margin: 0 0 2px; }
   button.recording { border-color: var(--accent); color: var(--accent); }
+  select { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: var(--fg); font: inherit; }
+  select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .meter { height: 6px; border-radius: 3px; background: var(--line); margin-top: 8px; overflow: hidden; }
+  .meter div { height: 100%; width: 0; background: var(--ok); transition: width 80ms linear; }
+  .meter.dead div { background: var(--err); }
+  #allResults { list-style: none; padding: 0; margin: 8px 0 0; font-size: 12.5px; }
+  #allResults li { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  #allResults .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--line); }
+  #allResults .ok .dot { background: var(--ok); } #allResults .bad .dot { background: var(--err); }
 </style>
 </head>
 <body>
@@ -83,6 +92,19 @@
     </div>
     <div id="hotkeyStatus" class="status" role="status" aria-live="polite"></div>
     <div id="hotkeyHint" class="hint">Click Record, then press and release the keys you want to hold (Esc cancels). Or type them joined with +: CTRL, SUPER (WIN), ALT and SHIFT match either side, e.g. CTRL+SUPER or KEY_RIGHTCTRL.</div>
+  </section>
+
+  <section>
+    <label class="title" for="mic">Microphone</label>
+    <div class="row">
+      <select id="mic" aria-describedby="micHint micStatus"></select>
+      <button id="testMic" type="button">Test</button>
+    </div>
+    <div id="micMeter" class="meter" aria-hidden="true"><div></div></div>
+    <div id="micStatus" class="status" role="status" aria-live="polite"></div>
+    <div id="micEnv" class="status warn" hidden></div>
+    <div id="micHint" class="hint">System default follows the input chosen in your system's sound settings, checked each time you start dictating, so switching or plugging in a mic needs no restart. If a chosen mic is missing, the default is used and you get a notification. <button id="testAll" class="link" type="button">Check all mics</button></div>
+    <ul id="allResults" aria-live="polite"></ul>
   </section>
 
   <section>
