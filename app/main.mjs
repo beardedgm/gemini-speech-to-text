@@ -2,7 +2,7 @@
 
 // Must stay the first import: repairs stdout/stderr before any dependency touches them.
 import { replaced as replacedStdio } from '../src/stdio-guard.js';
-import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, Notification, safeStorage, shell, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, Notification, safeStorage, session, shell, Tray } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,13 +10,16 @@ import { fileURLToPath } from 'node:url';
 import { configProblem, loadConfig } from '../src/config.js';
 import { DictationService } from '../src/engine.js';
 import { levelFrame } from '../src/micmonitor.js';
+import { DEFAULT_MIC, isDefaultMic, micFromEnv } from '../src/mics.js';
+import { testAllMicrophones, testMicrophone } from '../src/mictest.js';
 import { checkKey } from '../src/gemini.js';
 import { parseHotkey } from '../src/hotkey.js';
 import { hotkeyIssues, recordShortcut } from '../src/hotkeyrecord.js';
 import { loadPlatform } from '../src/platform/index.js';
 import { APP_NAME, APP_SLUG, migrateLegacyStateDir } from '../src/names.js';
 import { migrateFromFlowcode } from './migrate.js';
-import { mergeConfig, SettingsStore } from './store.js';
+import { RendererCapture } from './rendercapture.js';
+import { mergeConfig, SettingsStore, validMic } from './store.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ASSETS = path.join(ROOT, 'assets');
@@ -37,6 +40,10 @@ let state = 'idle';
 let lastError = null;
 let recording = null; // { promise, cancel } while Settings records a new hotkey
 let micWarning = null; // message while the mic isn't hearing anything during a hold
+let capture = null; // Windows: hidden getUserMedia capture window (RendererCapture)
+let captureWin = null;
+let captureFailed = null; // why it couldn't be used (ffmpeg is used instead)
+let captureTries = 0;
 
 function log(msg, { private: isPrivate = false } = {}) {
   try { console.log(new Date().toLocaleTimeString(), msg); } catch { /* no usable stdout */ }
@@ -144,7 +151,15 @@ function setState(s) {
 
 // On Windows, Electron's clipboard is far faster than PowerShell. On Linux,
 // wl-copy/xclip keep working without a focused window, so keep them.
+// Windows: capture in the hidden renderer (fast start, follows the Windows
+// default device); ffmpeg/DirectShow only if that window can't start.
+function micPlatform(p) {
+  if (p.name !== 'windows' || !capture || captureFailed) return p;
+  return { ...p, createRecorder: () => capture.createRecorder() };
+}
+
 function platformForApp(p) {
+  p = micPlatform(p);
   if (p.name !== 'windows') return p;
   const electronClipboard = {
     read: async () => (clipboard.availableFormats().some((f) => f.startsWith('text/')) ? clipboard.readText() : null),
@@ -162,6 +177,7 @@ async function startService() {
     refreshTray();
     return;
   }
+  await prepareCapture(config);
   service = new DictationService(config, platformForApp(platform));
   service.on('log', log);
   service.on('debug', (m) => config.debug && log(`[debug] ${m}`));
@@ -179,6 +195,10 @@ async function startService() {
     if (Notification.isSupported()) new Notification({ title: 'Microphone not hearing you', body: message, silent: true, urgency: 'critical' }).show();
   });
   service.on('mic-ok', () => { micWarning = null; refreshTray(); });
+  // The chosen mic wasn't there: say which one was used instead.
+  service.on('mic-fallback', ({ message }) => {
+    if (Notification.isSupported()) new Notification({ title: 'Using a different microphone', body: message, silent: true }).show();
+  });
   service.on('retry-available', refreshTray);
   try {
     await service.start();
@@ -190,12 +210,97 @@ async function startService() {
   refreshTray();
 }
 
-async function restartService() {
-  const old = service;
-  service = null;
-  await old?.stop();
-  state = 'idle';
-  await startService();
+// Serialized: two restarts at once (e.g. a Settings save while the capture
+// window restarts) must not leave two services listening.
+let restarting = Promise.resolve();
+function restartService() {
+  restarting = restarting.catch(() => {}).then(async () => {
+    const old = service;
+    service = null;
+    await old?.stop();
+    state = 'idle';
+    await startService();
+  });
+  return restarting;
+}
+
+// --- microphone capture (Windows) ---------------------------------------------------
+
+function createCaptureWindow() {
+  const ses = session.fromPartition('persist:capture');
+  const isCapture = (wc) => Boolean(wc && captureWin && wc.id === captureWin.webContents.id);
+  ses.setPermissionRequestHandler((wc, permission, cb, details) => {
+    cb(isCapture(wc) && permission === 'media' && !(details?.mediaTypes ?? []).includes('video'));
+  });
+  ses.setPermissionCheckHandler((wc, permission) => isCapture(wc) && permission === 'media');
+  captureWin = new BrowserWindow({
+    show: false, width: 200, height: 100, skipTaskbar: true, focusable: false,
+    webPreferences: {
+      preload: path.join(ROOT, 'app', 'capture-preload.cjs'), contextIsolation: true, sandbox: true,
+      nodeIntegration: false, backgroundThrottling: false, partition: 'persist:capture',
+    },
+  });
+  captureWin.webContents.on('render-process-gone', (_e, d) => {
+    log(`Microphone capture window stopped (${d.reason}); restarting it.`);
+    capture?.destroy();
+    capture = null;
+    captureWin = null;
+    restartService();
+  });
+  captureWin.loadFile(path.join(ROOT, 'app', 'capture.html'));
+  return { send: (cmd) => captureWin?.webContents.send('cap:command', cmd), destroy: () => captureWin?.destroy() };
+}
+
+async function prepareCapture(config) {
+  if (platform.name !== 'windows' || captureFailed) return;
+  if (!capture) {
+    capture = new RendererCapture({ createWindow: createCaptureWindow });
+    capture.on('devices-changed', (listing) => {
+      if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('mics:changed', listing);
+    });
+    const t0 = Date.now();
+    if (!(await capture.ready())) {
+      const why = capture.error || 'no response';
+      capture.destroy();
+      capture = null;
+      captureWin = null;
+      captureTries++;
+      if (captureTries < 2) { log(`Microphone capture window didn't start (${why}); trying once more.`); return prepareCapture(config); }
+      captureFailed = why;
+      log(`Microphone capture window didn't start (${why}); using ffmpeg instead.`);
+      return;
+    }
+    log(`Microphone capture ready in ${Date.now() - t0} ms: ${capture.devices.map((d) => d.name).join(', ') || 'no mics found'}${capture.defaultName ? ` (default ${capture.defaultName})` : ''}.`);
+  }
+  // GSTT_MIC may hold a DirectShow id ("@device_cm_..."): learn its name.
+  const pin = config.mic;
+  if (pin && !isDefaultMic(pin) && /^@device/i.test(pin.id) && !capture.aliases.has(pin.id)) {
+    const listing = await platform.listMicrophones().catch(() => null);
+    const d = listing?.devices.find((x) => x.id === pin.id);
+    if (d) capture.aliases.set(pin.id, d.name);
+  }
+}
+
+// What Settings shows: the mics now, the current default, the saved choice
+// and whether GSTT_MIC is set (so it's never a hidden pin).
+async function micListing() {
+  const listing = capture ? capture.listing() : await platform.listMicrophones().catch(() => ({ devices: [], defaultName: null }));
+  const env = micFromEnv();
+  const saved = validMic(store.settings.mic) ? store.settings.mic : null;
+  let envName = null;
+  if (env) envName = capture?.aliases.get(env.id) ?? listing.devices.find((d) => d.id === env.id)?.name ?? env.name;
+  return {
+    ...listing,
+    chosen: saved ?? (env ? { id: env.id, name: envName } : DEFAULT_MIC),
+    env: env ? { value: env.id, name: envName, overridden: Boolean(saved) } : null,
+    platform: platform.name,
+    usingFfmpeg: platform.name === 'windows' && !capture,
+  };
+}
+
+async function testMic(mic, onLevel) {
+  if (capture) return capture.test(mic, { seconds: 3, onLevel });
+  return testMicrophone(platform, mic, { seconds: 3, onLevel });
 }
 
 // --- start at login -------------------------------------------------------------
@@ -266,6 +371,10 @@ function registerIpc() {
       if (v.apiKey) store.setApiKey(v.apiKey);
       store.update({ mode: v.mode, hotkey: v.hotkey.split('+').map((k) => k.trim().toUpperCase()).join('+'), silenceDb: v.silenceDb, soundStart: Boolean(v.soundStart), soundDone: Boolean(v.soundDone) });
       if (v.startAtLogin !== isStartAtLogin()) setStartAtLogin(v.startAtLogin);
+      if (v.mic !== undefined) {
+        if (!validMic(v.mic)) throw new Error('Pick a microphone.');
+        store.update({ mic: { id: String(v.mic.id), name: String(v.mic.name ?? v.mic.id) } });
+      }
       await restartService();
       return { ok: true };
     } catch (e) {
@@ -289,6 +398,21 @@ function registerIpc() {
   });
 
   ipcMain.handle('settings:close', () => settingsWin?.close());
+
+  ipcMain.handle('mics:list', () => micListing());
+  ipcMain.handle('mics:test', async (e, mic) => {
+    const send = (db) => { if (!e.sender.isDestroyed()) e.sender.send('mics:level', mic?.id ?? 'default', db); };
+    try { return await testMic(mic ?? DEFAULT_MIC, send); } catch (err) { return { ok: false, kind: 'open-failed', text: `Couldn't open it: ${err.message}` }; }
+  });
+  ipcMain.handle('mics:test-all', async (e) => {
+    const send = (id, db) => { if (!e.sender.isDestroyed()) e.sender.send('mics:level', id, db); };
+    try {
+      if (capture) return await capture.testAll({ seconds: 3, onLevel: send });
+      return await testAllMicrophones(platform, { seconds: 3 });
+    } catch {
+      return [];
+    }
+  });
 
   ipcMain.handle('hotkey:check', (_e, spec) => hotkeyIssues(String(spec ?? ''), hotkeyCheckOptions()));
 
@@ -335,7 +459,7 @@ process.on('unhandledRejection', (err) => log(`Unhandled rejection: ${err?.stack
 
 app.on('second-instance', openSettings);
 app.on('window-all-closed', () => { /* stay in the tray */ });
-app.on('before-quit', () => { service?.stop(); });
+app.on('before-quit', () => { service?.stop(); capture?.destroy(); });
 
 app.whenReady().then(async () => {
   if (!isPrimaryInstance) return;
@@ -349,6 +473,8 @@ app.whenReady().then(async () => {
   if (store.data.startAtLogin && !isStartAtLogin()) setStartAtLogin(true);
   if (replacedStdio.length) log(`No usable ${replacedStdio.join('/')} (started without a terminal); console output goes to this log.`);
   registerIpc();
+  ipcMain.on('cap:event', (e, msg) => { if (captureWin && e.sender.id === captureWin.webContents.id) capture?.onEvent(msg); });
+  ipcMain.on('cap:chunk', (e, id, bytes) => { if (captureWin && e.sender.id === captureWin.webContents.id) capture?.onChunk(id, bytes); });
 
   tray = new Tray(icon('idle'));
   tray.on('click', openSettings);

@@ -78,16 +78,18 @@ test('normal room noise does not warn; signal after a warning clears it', () => 
 test('recorder restart replaces a stalled capture and keeps earlier audio', async () => {
   let n = 0;
   // First process: one chunk then stalls. Second: keeps sending.
-  const rec = new Recorder({ command: 'sh', args: [], stopProcess: (p) => p.kill('SIGTERM') });
+  // (node rather than sh: same on Linux and Windows, and no stray child processes)
+  const rec = new Recorder({ command: process.execPath, args: [], stopProcess: (p) => p.kill('SIGTERM') });
   rec.spawnProc = ((orig) => function () {
     n++;
-    this.args = ['-c', n === 1 ? 'printf AAAA; sleep 30' : 'while true; do printf BBBB; sleep 0.05; done'];
+    this.args = ['-e', n === 1 ? 'process.stdout.write("AAAA"); setInterval(() => {}, 1000)' : 'setInterval(() => process.stdout.write("BBBB"), 50)'];
     return orig.call(this);
   })(rec.spawnProc);
+  const until = async (re) => { for (let i = 0; i < 100 && !re.test(Buffer.concat(rec.chunks).toString()); i++) await new Promise((r) => setTimeout(r, 50)); };
   rec.start();
-  await new Promise((r) => setTimeout(r, 150));
+  await until(/AAAA/);
   assert.equal(rec.restart(), true);
-  await new Promise((r) => setTimeout(r, 200));
+  await until(/BBBB/);
   const pcm = await rec.stop();
   const s = pcm.toString();
   assert.ok(s.startsWith('AAAA') && s.includes('BBBB'), s.slice(0, 20));

@@ -10,4 +10,9 @@ contextBridge.exposeInMainWorld('gstt', {
   recordHotkey: () => ipcRenderer.invoke('hotkey:record'),
   cancelRecordHotkey: () => ipcRenderer.invoke('hotkey:cancel'),
   close: () => ipcRenderer.invoke('settings:close'),
+  listMics: () => ipcRenderer.invoke('mics:list'),
+  testMic: (mic) => ipcRenderer.invoke('mics:test', mic),
+  testAllMics: () => ipcRenderer.invoke('mics:test-all'),
+  onMicLevel: (fn) => ipcRenderer.on('mics:level', (_e, id, db) => fn(id, db)),
+  onMicsChanged: (fn) => ipcRenderer.on('mics:changed', () => fn()),
 });

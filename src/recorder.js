@@ -4,29 +4,42 @@
 // Audio is kept in memory and can be streamed chunk by chunk (live mode).
 
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 
 export const SAMPLE_RATE = 16000;
 
 const PW_RECORD = { command: 'pw-record', args: ['--rate=16000', '--channels=1', '--format=s16', '--raw', '-'] };
 
-export class Recorder {
+// Events: 'mic' ({ name, id, fallback }) when the capture path knows which
+// mic it opened (see src/mics.js for fallback).
+export class Recorder extends EventEmitter {
   // stopProcess(proc): ask the recorder to finish (pw-record: SIGINT; ffmpeg: "q" on stdin).
-  constructor({ command = PW_RECORD.command, args = PW_RECORD.args, stopProcess = (p) => p.kill('SIGINT') } = {}) {
+  // argsFor(mic): capture arguments for a mic choice (default: the fixed args).
+  // startupGraceMs: how long the capture tool may take to deliver its first
+  // audio before it counts as "sending no audio" (ffmpeg/dshow is slow to start).
+  constructor({ command = PW_RECORD.command, args = PW_RECORD.args, stopProcess = (p) => p.kill('SIGINT'), argsFor = null, startupGraceMs = 500 } = {}) {
+    super();
     this.command = command;
     this.args = args;
+    this.argsFor = argsFor;
     this.stopProcess = stopProcess;
+    this.startupGraceMs = startupGraceMs;
     this.proc = null;
+    this.micName = null;
   }
 
-  // onChunk(buffer) receives raw PCM as it arrives.
-  start({ onChunk } = {}) {
+  // onChunk(buffer) receives raw PCM as it arrives. mic: a choice from src/mics.js.
+  start({ onChunk, mic = null } = {}) {
     if (this.proc) throw new Error('Already recording');
     this.chunks = [];
     this.stderr = '';
     this.openError = null;
     this.onChunk = onChunk;
+    this.mic = mic;
     this.replaced = new WeakSet();
+    this.generation = (this.generation ?? 0) + 1;
+    if (this.argsFor) this.args = this.argsFor(mic);
     this.spawnProc();
   }
 
@@ -43,10 +56,13 @@ export class Recorder {
     });
     proc.stderr.on('data', (d) => { this.stderr += d; });
     proc.on('error', (err) => { this.stderr += err.message; });
+    // 'exit' (process gone, device released) can come well before 'close'
+    // (all pipes closed) if a child process inherited the pipes.
+    proc.exitedProc = new Promise((resolve) => proc.on('exit', resolve));
     this.exited = new Promise((resolve) => proc.on('close', (code) => {
       // Quit on its own, before being asked and without any audio: the
       // device couldn't be opened (missing, in use, bad name...).
-      if (this.proc === proc && !gotData && code !== 0) {
+      if (this.proc === proc && !this.replaced.has(proc) && !gotData && code !== 0) {
         this.openError = captureErrorSummary(this.stderr) || `${this.command} exited with code ${code}`;
       }
       resolve(code);
@@ -54,12 +70,20 @@ export class Recorder {
   }
 
   // Replace a stalled capture process mid-recording, keeping audio so far.
-  restart() {
+  // The old process is killed and gone (device released) before the new one
+  // starts, so two captures never fight over the same mic. argsFor is
+  // re-applied, so a changed mic choice takes effect.
+  restart({ mic = this.mic } = {}) {
     const old = this.proc;
     if (!old) return false;
+    const gen = this.generation;
+    this.openError = null;
     this.replaced.add(old);
-    this.spawnProc();
+    this.mic = mic;
+    if (this.argsFor) this.args = this.argsFor(mic);
     old.kill('SIGKILL');
+    const respawn = () => { if (this.proc === old && this.generation === gen) this.spawnProc(); };
+    Promise.race([old.exitedProc, new Promise((r) => setTimeout(r, 1000))]).then(respawn);
     return true;
   }
 
@@ -68,10 +92,18 @@ export class Recorder {
     if (!this.proc) return null;
     const proc = this.proc;
     this.proc = null;
+    if (this.replaced.has(proc)) { // stopped mid-restart: it's already being killed
+      await Promise.race([proc.exitedProc, new Promise((r) => setTimeout(r, 1000))]);
+      return this.finish();
+    }
     this.stopProcess(proc);
     const timeout = setTimeout(() => proc.kill('SIGKILL'), 2000);
     await this.exited;
     clearTimeout(timeout);
+    return this.finish();
+  }
+
+  finish() {
     const pcm = Buffer.concat(this.chunks);
     if (pcm.length === 0) {
       if (this.openError) throw Object.assign(new Error(`Couldn't open the microphone: ${this.openError}`), { openFailed: this.openError });

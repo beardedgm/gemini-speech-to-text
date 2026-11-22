@@ -11,7 +11,9 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { HoldToTalk, KEY_CODES } from '../hotkey.js';
 import { envSetting, stateDir } from '../names.js';
+import { cleanLabel, isDefaultMic, micFromEnv, resolveMic } from '../mics.js';
 import { Recorder } from '../recorder.js';
+import { CoreAudioHelper, dshowDeviceForEndpoint, ENDPOINT_ACTIVE } from './wincoreaudio.js';
 import { pasteText as pasteWith } from '../paste.js';
 
 export const name = 'windows';
@@ -158,19 +160,45 @@ async function listMicrophoneDevices() {
   return parseDshowAudioDeviceList(String(r.stderr ?? ''));
 }
 
-export async function listMicrophones() {
-  return (await listMicrophoneDevices()).map((d) => d.name);
+// Core Audio: the Windows default recording device and mute state.
+let coreAudio;
+export function coreAudioHelper() {
+  coreAudio ??= new CoreAudioHelper();
+  return coreAudio;
 }
 
-// Pick GSTT_MIC (display or alternative name) or the first device.
-// Returns { name, input }: name for messages, input for ffmpeg. ffmpeg's dshow
-// input splits on ':' (video:audio), so "Microphone (Elgato Wave:3)" can't be
-// opened by name; the alternative name has no ':' and is used when known.
-export function resolveMicrophone(devices, wanted) {
-  const dev = wanted
-    ? devices.find((d) => d.name === wanted || d.altName === wanted) ?? { name: wanted, altName: null }
-    : devices[0];
-  return dev ? { name: dev.name, input: dev.altName ?? dev.name } : null;
+// dshow devices as mic choices ({ id, name, altIds }, see src/mics.js).
+export function dshowChoices(devices) {
+  return devices.map((d) => ({ id: d.altName ?? d.name, name: d.name, altIds: [d.name] }));
+}
+
+// Mics for the Settings picker: [{ id, name }] plus the current default.
+export async function listMicrophones() {
+  const [devices, endpoints] = await Promise.all([listMicrophoneDevices(), coreAudioHelper().endpoints()]);
+  const def = endpoints?.find((e) => e.isDefault);
+  const defDev = def ? dshowDeviceForEndpoint(devices, def) : devices[0];
+  return { devices: dshowChoices(devices), defaultName: defDev?.name ?? def?.name ?? null };
+}
+
+// Which dshow device a choice means right now. Returns { name, input, fallback }:
+// name for messages, input for ffmpeg. ffmpeg's dshow input splits on ':'
+// (video:audio), so "Microphone (Elgato Wave:3)" can't be opened by name; the
+// alternative name has no ':' and is used when known. With no choice (or
+// "System default") it's the Windows default recording device, mapped through
+// its endpoint GUID; without Core Audio, the first dshow device.
+export function resolveMicrophone(devices, wanted, endpoints = null) {
+  const choice = typeof wanted === 'string' ? { id: wanted, name: wanted } : wanted;
+  const { device, fallback } = resolveMic(dshowChoices(devices), choice);
+  let dev = device && devices.find((d) => (d.altName ?? d.name) === device.id);
+  if (!dev && !isDefaultMic(choice) && !devices.length) {
+    // Nothing listed (listing failed): try the name as given.
+    return { name: choice.name, input: choice.id, fallback: null };
+  }
+  if (!dev) {
+    const def = endpoints?.find((e) => e.isDefault);
+    dev = (def && dshowDeviceForEndpoint(devices, def)) || devices[0];
+  }
+  return dev ? { name: dev.name, input: dev.altName ?? dev.name, fallback } : null;
 }
 
 export function ffmpegMicArgs(device) {
@@ -178,24 +206,52 @@ export function ffmpegMicArgs(device) {
     '-i', `audio=${device}`, '-ac', '1', '-ar', '16000', '-f', 's16le', '-'];
 }
 
-let mic; // { name, input } once resolved
+// ffmpeg/dshow needs ~450 ms (measured: median 450, max 482 over 20 cold
+// starts) to deliver its first audio; don't call the mic dead before this.
+export const FFMPEG_STARTUP_GRACE_MS = 1500;
+
+// The ffmpeg (DirectShow) recorder: used by the CLI, and by the tray app only
+// if its own capture can't start. The mic is resolved again for every
+// dictation: capture starts at once with the last known device list (so no
+// time is lost at key-down), then the list and the Windows default are
+// re-read, and capture switches if the right device turned out to differ.
 export function createRecorder() {
+  let devices = null;
+  let endpoints = null;
+  let resolved = null;
+  const refresh = async () => {
+    [devices, endpoints] = await Promise.all([listMicrophoneDevices(), coreAudioHelper().endpoints()]);
+  };
   const rec = new Recorder({
     command: ffmpegPath(),
     args: [],
     stopProcess: (p) => { try { p.stdin.write('q'); } catch { p.kill(); } }, // ffmpeg quits cleanly on "q"
+    argsFor: (mic) => {
+      resolved = resolveMicrophone(devices ?? [], mic ?? micFromEnv(), endpoints);
+      if (!resolved) throw new Error('No microphone found (ffmpeg -list_devices). Plug one in, or pick one in Settings.');
+      rec.micName = resolved.name;
+      return ffmpegMicArgs(resolved.input);
+    },
+    startupGraceMs: FFMPEG_STARTUP_GRACE_MS,
   });
-  const start = rec.start.bind(rec);
-  // Resolve the mic once (GSTT_MIC or the first DirectShow audio device).
-  rec.prepare = async () => {
-    mic ??= resolveMicrophone(await listMicrophoneDevices(), envSetting(process.env, 'MIC'));
-    if (!mic) throw new Error('No microphone found (ffmpeg -list_devices). Set GSTT_MIC.');
-    rec.args = ffmpegMicArgs(mic.input);
-    return mic.name;
+  rec.prepare = async (mic = null) => {
+    await refresh();
+    const r = resolveMicrophone(devices, mic ?? micFromEnv(), endpoints);
+    if (!r) throw new Error('No microphone found (ffmpeg -list_devices). Plug one in, or pick one in Settings.');
+    return r.name;
   };
-  rec.start = (opts) => {
-    if (!rec.args.length) throw new Error('Microphone not ready yet');
-    return start(opts);
+  const start = rec.start.bind(rec);
+  rec.start = (opts = {}) => {
+    if (!devices) throw new Error('Microphone not ready yet');
+    start(opts);
+    const first = resolved;
+    const gen = rec.generation;
+    refresh().then(() => {
+      if (!rec.proc || rec.generation !== gen) return;
+      const now = resolveMicrophone(devices, rec.mic ?? micFromEnv(), endpoints);
+      if (now && now.input !== first.input) rec.restart();
+      rec.emit('mic', { name: (now ?? first).name, fallback: (now ?? first).fallback });
+    }).catch(() => rec.emit('mic', { name: first.name, fallback: first.fallback }));
   };
   return rec;
 }
@@ -243,9 +299,24 @@ export function pasteDescription() {
   return 'clipboard + Ctrl+V';
 }
 
-// The DirectShow mic in use (resolved when recording is first prepared).
+// The Core Audio endpoint behind a mic name (null name: the Windows default).
+async function endpointFor(name) {
+  const eps = await coreAudioHelper().endpoints();
+  if (!eps) return null;
+  return eps.find((e) => e.state === ENDPOINT_ACTIVE && (name ? e.name === cleanLabel(name) : e.isDefault)) ?? null;
+}
+
+// True if Windows has the mic muted (Sound settings or a mic's mute key that
+// Windows knows about), false if not, null if unknown. Some USB mics (e.g.
+// the Elgato Wave:3's own mute) don't tell Windows; those show up as silence.
+export async function microphoneMuted(mic = null) {
+  return (await endpointFor(mic?.name ?? null))?.muted ?? null;
+}
+
+// The Windows default recording device's name (the mic in use is known to
+// the recorder: Recorder.micName).
 export async function microphoneName() {
-  return mic?.name ?? null;
+  return (await endpointFor(null))?.name ?? null;
 }
 
 export function listKeyboards() {

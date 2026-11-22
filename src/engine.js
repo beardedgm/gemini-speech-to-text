@@ -9,6 +9,7 @@ import { cleanupTranscript, loadDictionary, transcribe } from './gemini.js';
 import { parseHotkey } from './hotkey.js';
 import { LiveTranscriber } from './live.js';
 import { MicMonitor, MIC_PROBLEMS } from './micmonitor.js';
+import { fallbackMessage } from './mics.js';
 import { pcmLevels, pcmSeconds, toWav, wavPcm } from './recorder.js';
 
 // Returns why a clip should be skipped, or null if it should be transcribed.
@@ -77,6 +78,7 @@ export class Dictation {
 //   'mic-warning' ({ reason, mic, message }) - mic isn't hearing anything, ~1 s into a hold
 //   'mic-ok' () - signal arrived after a warning
 //   'retry-available' (boolean) - a failed dictation's audio is kept for "Retry last dictation"
+//   'mic-fallback' ({ message, wanted, used }) - the chosen mic wasn't there; the default was used
 export class DictationService extends EventEmitter {
   constructor(config, platform, { dictationFactory, monitorFactory, retryFile, transcribeFn } = {}) {
     super();
@@ -84,7 +86,9 @@ export class DictationService extends EventEmitter {
     this.platform = platform;
     this.state = 'idle';
     this.makeDictation = dictationFactory ?? ((cfg, opts) => new Dictation(cfg, opts));
-    this.makeMonitor = monitorFactory ?? (() => new MicMonitor({ checkAfterMs: 500 }));
+    // Slow-starting capture (ffmpeg/dshow) gets its measured startup time
+    // before "no audio" is judged; see Recorder.startupGraceMs.
+    this.makeMonitor = monitorFactory ?? ((rec) => new MicMonitor({ checkAfterMs: 500, graceMs: rec?.startupGraceMs ?? 500 }));
     // Audio of the last dictation that failed, kept so it can be retried.
     this.retryFile = retryFile ?? (platform.logDir ? path.join(platform.logDir(), 'last-dictation.wav') : null);
     this.lastFailed = null;
@@ -115,16 +119,40 @@ export class DictationService extends EventEmitter {
 
   log(msg, opts = {}) { this.emit('log', msg, opts); }
 
+  // The mic of the current/last dictation as { id, name } for the platform's
+  // name/mute/recover helpers (null: the system default).
+  micRef() {
+    const r = this.recorder;
+    return r?.micId || r?.micName ? { id: r.micId ?? null, name: r.micName ?? null } : null;
+  }
+
+  async micName() {
+    return this.recorder?.micName ?? (await this.platform.microphoneName?.(this.micRef()).catch(() => null)) ?? null;
+  }
+
   async start() {
     const { config, platform } = this;
     this.recorder = platform.createRecorder();
+    // Which mic each dictation actually opened (resolved at key-down).
+    this.recorder.on?.('mic', ({ name, fallback }) => {
+      if (name && name !== this.lastMicLogged) this.log(`Microphone: ${name}`);
+      this.lastMicLogged = name;
+      if (fallback) {
+        const message = fallbackMessage(fallback, name);
+        this.log(message);
+        this.emit('mic-fallback', { message, wanted: fallback.wanted, used: name });
+      }
+    });
     if (this.retryFile && fs.existsSync(this.retryFile)) {
       try {
         this.lastFailed = wavPcm(fs.readFileSync(this.retryFile));
         this.emit('retry-available', true);
       } catch { /* ignore a damaged file */ }
     }
-    if (this.recorder.prepare) this.log(`Microphone: ${await this.recorder.prepare()}`);
+    if (this.recorder.prepare) {
+      this.lastMicLogged = await this.recorder.prepare(config.mic ?? null);
+      this.log(`Microphone: ${this.lastMicLogged}`);
+    }
     const hk = platform.createHotkey(parseHotkey(config.hotkey), { onWarn: (m) => this.log(m) });
     this.hotkey = hk;
     hk.on('error', (err) => {
@@ -149,7 +177,7 @@ export class DictationService extends EventEmitter {
     try {
       const d = this.makeDictation(this.config, { log: (m) => this.log(m) });
       this.current = d;
-      const mon = this.makeMonitor();
+      const mon = this.makeMonitor(this.recorder);
       this.monitor = mon;
       let recoveries = 0;
       let recoveredLogged = false;
@@ -167,7 +195,7 @@ export class DictationService extends EventEmitter {
         // resets won't help and "Is it muted?" would mislead.
         const openError = this.recorder.openError;
         if (openError) {
-          const mic = await this.platform.microphoneName?.().catch(() => null);
+          const mic = await this.micName();
           if (this.monitor !== mon) return;
           const message = `Couldn't open ${mic ?? 'the microphone'}: ${openError}`;
           this.warned = true;
@@ -177,7 +205,7 @@ export class DictationService extends EventEmitter {
           return;
         }
         // Muted (e.g. the mic's own mute button): say so; resets can't help.
-        if (reason !== 'too-quiet' && (await this.platform.microphoneMuted?.().catch(() => null)) === true) {
+        if (reason !== 'too-quiet' && (await this.platform.microphoneMuted?.(this.micRef()).catch(() => null)) === true) {
           if (this.monitor !== mon) return;
           reason = 'muted';
           recoveries = MAX_MIC_RECOVERIES;
@@ -190,14 +218,14 @@ export class DictationService extends EventEmitter {
         if (reason !== 'too-quiet' && recoveries < MAX_MIC_RECOVERIES && this.recorder.restart) {
           recoveries++;
           this.log(`Microphone ${MIC_PROBLEMS[reason]}; resetting it (try ${recoveries}).`);
-          await this.platform.recoverMic?.().catch(() => {});
+          await this.platform.recoverMic?.(this.micRef()).catch(() => {});
           if (this.monitor !== mon) return; // released meanwhile
           this.recorder.restart();
           mon.warning = null;
           mon.schedule();
           return;
         }
-        const mic = await this.platform.microphoneName?.().catch(() => null);
+        const mic = await this.micName();
         if (this.monitor !== mon || !mon.warning) return; // released or recovered meanwhile
         const message = reason === 'muted'
           ? `${mic ?? 'Your microphone'} is muted. Unmute it to dictate.`
@@ -208,7 +236,11 @@ export class DictationService extends EventEmitter {
         this.emit('mic-warning', { reason, mic, message });
       });
       mon.start();
-      this.recorder.start({ onChunk: (c) => { d.push(c); mon.push(c); } });
+      this.recorder.start({ mic: this.config.mic ?? null, onChunk: (c) => { d.push(c); mon.push(c); } });
+      // Muted in Windows/PipeWire: say so at once instead of waiting for silence.
+      this.platform.microphoneMuted?.(this.micRef())?.then?.((muted) => {
+        if (muted === true && this.monitor === mon && !mon.warning) { mon.warning = 'muted'; mon.emit('warning', 'muted'); }
+      }).catch(() => {});
       if (this.config.soundStart !== false) this.platform.beep('start');
       this.log('Recording...');
       this.setState('recording');
@@ -238,7 +270,7 @@ export class DictationService extends EventEmitter {
       const t0 = Date.now();
       const { text, raw, skipped } = await this.current.finish(pcm);
       if (skipped === MIC_SILENT) {
-        const mic = await this.platform.microphoneName?.().catch(() => null);
+        const mic = await this.micName();
         this.log(`Not sent: ${skipped}${mic ? ` (${mic})` : ''}.`);
         if (!this.warned) this.emit('error', `Your microphone${mic ? ` (${mic})` : ''} sent no sound at all. Is it muted?`);
         return;
@@ -263,7 +295,7 @@ export class DictationService extends EventEmitter {
       // An empty recording was already announced by the early mic warning.
       if (e.openFailed) {
         if (!this.warned) {
-          const mic = await this.platform.microphoneName?.().catch(() => null);
+          const mic = await this.micName();
           this.emit('error', `Couldn't open ${mic ?? 'the microphone'}: ${e.openFailed}`);
         }
       } else if (!(this.warned && /Recording is empty/.test(e.message))) {

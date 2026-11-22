@@ -3,6 +3,7 @@
 import path from 'node:path';
 import { DEFAULT_CLEANUP_MODEL, DEFAULT_MODEL } from './gemini.js';
 import { DEFAULT_LIVE_MODEL } from './live.js';
+import { micFromEnv } from './mics.js';
 import { envSetting } from './names.js';
 
 export function loadConfig(env = process.env, root = process.cwd()) {
@@ -19,6 +20,8 @@ export function loadConfig(env = process.env, root = process.cwd()) {
     cleanupModel: get('CLEANUP_MODEL') || DEFAULT_CLEANUP_MODEL,
     // Hold both (either side): Ctrl+Super, Ctrl+Win on Windows.
     hotkey: get('HOTKEY') || 'CTRL+SUPER',
+    // GSTT_MIC pins one mic; otherwise the system default, resolved at each dictation.
+    mic: micFromEnv(env),
     dictionary: path.resolve(root, get('DICTIONARY') || 'dictionary.txt'),
     restore: get('RESTORE_CLIPBOARD') !== '0',
     minSeconds: 0.3,
