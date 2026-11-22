@@ -18,7 +18,8 @@
     "test": "node --test --test-timeout=10000",
     "icons": "node scripts/make-icons.mjs",
     "dist:linux": "electron-builder --linux AppImage deb",
-    "dist:win": "node scripts/fetch-win-ffmpeg.mjs && electron-builder --win nsis"
+    "dist:win": "node scripts/fetch-win-ffmpeg.mjs && electron-builder --win nsis",
+    "dist:win:portable": "node scripts/fetch-win-ffmpeg.mjs && electron-builder --win zip --x64 -c.win.signAndEditExecutable=false"
   },
   "engines": {
     "node": ">=22"
@@ -86,6 +87,7 @@
         "nsis"
       ],
       "icon": "assets/icon.png",
+      "artifactName": "Gemini-Speech-to-Text-${version}-win-${arch}-portable.${ext}",
       "extraResources": [
         {
           "from": "build/vendor/win32-x64/ffmpeg.exe",
